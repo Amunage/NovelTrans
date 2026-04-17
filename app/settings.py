@@ -107,8 +107,8 @@ _DEFAULT_REFINER_INSTRUCTIONS = [
 ]
 
 LLAMA_SERVER_PATH = _get_path("LLAMA_SERVER_PATH", r"D:\llama.cpp\llama-server.exe")
-LLAMA_MODEL_PATH = _get_path("LLAMA_MODEL_PATH", r"D:\llama.cpp\models\supergemma4\supergemma4-26b-uncensored-fast-v2-Q4_K_M.gguf")
-GLOSSARY_PATH = _get_path("GLOSSARY_PATH", "glossary/umamusume.json")
+LLAMA_MODEL_PATH = _get_path("LLAMA_MODEL_PATH", r"D:\llama.cpp\models\model.gguf")
+GLOSSARY_PATH = _get_path("GLOSSARY_PATH", "glossary/glossary.json")
 SOURCE_PATH = _get_path("SOURCE_PATH", "source")
 DEFAULT_SERVER_URL = _get_str("SERVER_URL", "http://127.0.0.1:8080")
 DEFAULT_OUTPUT_ROOT = _get_path("OUTPUT_ROOT", "translated")

@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import sys
 
+from app.setup import ensure_runtime_setup
+
+ensure_runtime_setup()
+
 from app.client import main as translation_main
 from app.crawler import main as crawler_main
 from app.ui import render_main_menu
