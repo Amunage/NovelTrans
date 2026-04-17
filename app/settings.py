@@ -2,7 +2,17 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
+
+
+def _get_app_root() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parents[1]
+
+
+APP_ROOT = _get_app_root()
 
 
 def _warn_invalid_env(name: str, value: str, default):
@@ -10,7 +20,7 @@ def _warn_invalid_env(name: str, value: str, default):
 
 
 def _load_dotenv():
-    env_path = Path(__file__).resolve().parents[1] / ".env"
+    env_path = APP_ROOT / ".env"
     if not env_path.exists():
         return
 
@@ -27,6 +37,14 @@ def _load_dotenv():
 
 def _get_str(name: str, default: str) -> str:
     return os.getenv(name, default)
+
+
+def _get_path(name: str, default: str) -> Path:
+    raw_value = _get_str(name, default)
+    path = Path(raw_value)
+    if path.is_absolute():
+        return path
+    return APP_ROOT / path
 
 
 def _get_int(name: str, default: int) -> int:
@@ -88,12 +106,12 @@ _DEFAULT_REFINER_INSTRUCTIONS = [
     "Do not intensify, embellish, or over-explain.",
 ]
 
-LLAMA_SERVER_PATH = Path(_get_str("LLAMA_SERVER_PATH", r"D:\llama.cpp\llama-server.exe"))
-LLAMA_MODEL_PATH = Path(_get_str("LLAMA_MODEL_PATH", r"D:\llama.cpp\models\supergemma4\supergemma4-26b-uncensored-fast-v2-Q4_K_M.gguf"))
-GLOSSARY_PATH = Path(_get_str("GLOSSARY_PATH", "glossary/umamusume.json"))
-SOURCE_PATH = Path(_get_str("SOURCE_PATH", "source"))
+LLAMA_SERVER_PATH = _get_path("LLAMA_SERVER_PATH", r"D:\llama.cpp\llama-server.exe")
+LLAMA_MODEL_PATH = _get_path("LLAMA_MODEL_PATH", r"D:\llama.cpp\models\supergemma4\supergemma4-26b-uncensored-fast-v2-Q4_K_M.gguf")
+GLOSSARY_PATH = _get_path("GLOSSARY_PATH", "glossary/umamusume.json")
+SOURCE_PATH = _get_path("SOURCE_PATH", "source")
 DEFAULT_SERVER_URL = _get_str("SERVER_URL", "http://127.0.0.1:8080")
-DEFAULT_OUTPUT_ROOT = Path(_get_str("OUTPUT_ROOT", "translated"))
+DEFAULT_OUTPUT_ROOT = _get_path("OUTPUT_ROOT", "translated")
 DEFAULT_MAX_CHARS = _get_int("MAX_CHARS", 1400)
 DEFAULT_TIMEOUT = _get_int("TIMEOUT", 180)
 DEFAULT_DRAFT_TEMPERATURE = _get_float("DRAFT_TEMPERATURE", 0.2)
