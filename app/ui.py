@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from turtle import title
 from typing import Sequence
 
 
@@ -52,6 +53,15 @@ def _build_progress_bar(current: int, total: int, width: int = 28) -> str:
     safe_current = max(0, min(current, safe_total))
     filled = round((safe_current / safe_total) * width)
     return f"[{'#' * filled}{'-' * (width - filled)}]"
+
+
+def _format_elapsed_time(elapsed_seconds: int) -> str:
+    safe_seconds = max(0, elapsed_seconds)
+    hours, remainder = divmod(safe_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours > 0:
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes:02d}:{seconds:02d}"
 
 
 def render_main_menu(status_message: str | None = None) -> None:
@@ -216,7 +226,6 @@ def render_crawl_complete_screen(
     success_count: int,
     failed_count: int,
     output_path: Path,
-    combined_path: Path | None = None,
     status_message: str | None = None,
 ) -> None:
     clear_screen()
@@ -226,8 +235,6 @@ def render_crawl_complete_screen(
     print(f"성공: {success_count}/{total}")
     print(f"실패: {failed_count}개")
     print(f"출력 폴더: {output_path}")
-    if combined_path is not None:
-        print(f"합본 파일: {combined_path}")
     print("-" * 60)
     print(status_message or "")
     print("-" * 60)
@@ -256,10 +263,8 @@ def render_translation_selection_screen(
     elif step == "chapter" and selected_novel is not None and chapter_files is not None:
         print("번역할 챕터 번호 또는 범위를 입력해 주세요. (예: 3 또는 1~5)")
         print("-" * 60)
-        first_num = int(chapter_files[0].stem)
-        last_num = int(chapter_files[-1].stem)
         print(f"선택한 소설: {selected_novel.name}")
-        print(f"발견 챕터: {len(chapter_files)}개 ({first_num:04d}~{last_num:04d})")
+        print(f"발견 챕터: {len(chapter_files)}개")
 
     print("-" * 60)
     print(status_message or "")
@@ -273,6 +278,7 @@ def render_translation_progress_screen(
     stage: str,
     current: int,
     total: int,
+    elapsed_seconds: int = 0,
     source_file: Path,
     title: str,
     output_path: Path,
@@ -282,15 +288,21 @@ def render_translation_progress_screen(
     _print_header("번역")
     print(f"단계: {stage}")
     print("-" * 60)
-    print(f"전체 진행: {_build_progress_bar(file_index - 1, total_files)} {file_index}/{total_files}")
+    
     if stage in {"모델 로드"}:
-        print(f"모델 로드: {_build_progress_bar(current, total)} {current} / {total}")
+        print(f"모델 불러오는 중...")
     else:
+        print(f"전체 진행: {_build_progress_bar(file_index - 1, total_files)} {file_index}/{total_files}")
         print(f"챕터 진행: {_build_progress_bar(current, total)} {current}/{total}")
-    print("-" * 60)
-    print(f"파일: {source_file.name}")
-    print(f"제목: {title}")
-    print(f"출력 경로: {output_path}")
+
+    print(f"경과 시간: {_format_elapsed_time(elapsed_seconds)}")
+
+    if stage in {"초벌 번역", "다듬기"}:
+        print("-" * 60)
+        print(f"파일: {source_file.name}")
+        print(f"작업 제목: {title}")
+        print(f"출력 경로: {output_path}")
+
     print("-" * 60)
     print(status_message or "")
     print("-" * 60)
@@ -311,7 +323,7 @@ def render_translation_complete_screen(
     print(f"완료 파일: {completed_files}/{total_files}")
     print(f"출력 폴더: {output_root}")
     if last_output_path is not None:
-        print(f"마지막 결과 파일: {last_output_path}")
+        print(f"결과 파일: {last_output_path}")
     print("-" * 60)
     print(status_message or "")
     print("-" * 60)

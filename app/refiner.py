@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
-from app.settings import REFINER_INSTRUCTIONS
+from app.config import REFINER_INSTRUCTIONS
 from app.translation import (
     TranslationConfig,
     TranslatorClient,
@@ -58,6 +58,9 @@ def _refine_once(
     config: TranslationConfig,
     *,
     is_title: bool,
+    item_index: int,
+    total_items: int,
+    progress_callback: Callable[[str, int, int, str | None], None] | None = None,
 ) -> str:
     prompt = build_refine_prompts(current_text, previous_source, glossary, is_title=is_title)
     base_temperature = config.refine_temperature
@@ -69,6 +72,11 @@ def _refine_once(
         temperature=temperature,
         top_p=top_p,
         n_predict=max_tokens,
+        wait_callback=(
+            (lambda: progress_callback("다듬기", item_index - 1, total_items, None))
+            if progress_callback is not None
+            else None
+        ),
     )
 
 
@@ -104,6 +112,9 @@ def refine_document(
         is_title=True,
         client=client,
         config=config,
+        item_index=1,
+        total_items=total_items,
+        progress_callback=progress_callback,
     )
     refined_title = normalize_translation(refined_title)
     refined_title = refined_title or translated_title
@@ -128,6 +139,9 @@ def refine_document(
             is_title=False,
             client=client,
             config=config,
+            item_index=index,
+            total_items=total_items,
+            progress_callback=progress_callback,
         )
 
         refined_chunk = normalize_translation(refined_chunk)

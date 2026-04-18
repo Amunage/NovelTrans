@@ -9,9 +9,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from app.utils import find_chapter_files, find_source_novels
-
-
 def _get_windows_executable_dir() -> Path | None:
     if os.name != "nt":
         return None
@@ -39,7 +36,9 @@ def get_app_root() -> Path:
 
 
 APP_ROOT = get_app_root()
-LOG_FILE_NAME = "noveltrans.log"
+PROMPT_SETTINGS_PATH = APP_ROOT / "datas" / "prompt.json"
+DATA_DIR = APP_ROOT / "datas"
+LOG_FILE_NAME = "app.log"
 _LOGGING_INITIALIZED = False
 DEFAULT_MODEL_FILENAME = "gemma-4-26B-A4B-it-UD-Q4_K_M.gguf"
 EDITABLE_ENV_KEYS = [
@@ -78,9 +77,54 @@ DEFAULT_ENV_VALUES = {
 }
 DEFAULT_ENV_CONTENT = "\n".join(f"{key}={value}" for key, value in DEFAULT_ENV_VALUES.items()) + "\n"
 DEFAULT_GLOSSARY_CONTENT = """{
- "ウマ娘": "우마무스메"
+ "ウマ娘": "우마무스메",
+ "トレセン": "트레센"
 }
 """
+
+
+DEFAULT_PROMPT_SETTINGS = {
+    "separator_line": "=" * 60,
+    "translation_instructions": [
+        "You are a professional literary translator for web novels.",
+        "Translate the source text into faithful Korean that still reads naturally.",
+        "Preserve meaning, tone, paragraph structure, and dialogue flow.",
+        "Do not omit, summarize, simplify, or add information.",
+        "Keep names, forms of address, and terminology consistent.",
+        "Return only the Korean translation of the requested text.",
+        "Do not add notes, labels, summaries, or quotation marks unless they exist in the source.",
+        "Do not explain your reasoning.",
+    ],
+    "refiner_instructions": [
+        "Rewrite this into natural Korean literary prose in a restrained, understated style.",
+        "Do not intensify, embellish, or over-explain.",
+    ],
+}
+DEFAULT_PROMPT_CONTENT = json.dumps(DEFAULT_PROMPT_SETTINGS, ensure_ascii=False, indent=2) + "\n"
+
+
+def _load_prompt_settings() -> tuple[str, list[str], list[str]]:
+    data = json.loads(PROMPT_SETTINGS_PATH.read_text(encoding="utf-8"))
+
+    separator_line = data.get("separator_line")
+    translation_instructions = data.get("translation_instructions")
+    refiner_instructions = data.get("refiner_instructions")
+
+    if not isinstance(separator_line, str) or not separator_line:
+        raise ValueError(f"Invalid separator_line in {PROMPT_SETTINGS_PATH}")
+    if not isinstance(translation_instructions, list) or not all(
+        isinstance(item, str) for item in translation_instructions
+    ):
+        raise ValueError(f"Invalid translation_instructions in {PROMPT_SETTINGS_PATH}")
+    if not isinstance(refiner_instructions, list) or not all(isinstance(item, str) for item in refiner_instructions):
+        raise ValueError(f"Invalid refiner_instructions in {PROMPT_SETTINGS_PATH}")
+
+    return separator_line, translation_instructions, refiner_instructions
+
+
+SEPARATOR_LINE, TRANSLATION_INSTRUCTIONS, REFINER_INSTRUCTIONS = _load_prompt_settings()
+TRANSLATION_INSTRUCTIONS = TRANSLATION_INSTRUCTIONS.copy()
+REFINER_INSTRUCTIONS = REFINER_INSTRUCTIONS.copy()
 
 
 @dataclass(frozen=True)
@@ -103,7 +147,7 @@ class RuntimeSettings:
 
 
 def get_log_path() -> Path:
-    primary_path = APP_ROOT / LOG_FILE_NAME
+    primary_path = DATA_DIR / LOG_FILE_NAME
     try:
         primary_path.parent.mkdir(parents=True, exist_ok=True)
         return primary_path
@@ -290,6 +334,8 @@ def get_configured_source_path(env_path: Path | None = None) -> Path:
 
 
 def get_translation_block_reason() -> str | None:
+    from app.utils import find_chapter_files, find_source_novels
+
     model_path = get_configured_model_path()
     if not model_path.is_file():
         return f"[ERROR] GGUF 모델이 없습니다. 설정을 확인해주세요."

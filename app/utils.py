@@ -4,6 +4,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.config import SEPARATOR_LINE
+
 
 @dataclass
 class SourceDocument:
@@ -20,10 +22,9 @@ def find_source_novels(source_root: Path) -> list[Path]:
 
 
 def find_chapter_files(novel_dir: Path) -> list[Path]:
-    chapter_pattern = re.compile(r"\d{4}\.txt$")
     return sorted(
-        [path for path in novel_dir.iterdir() if path.is_file() and chapter_pattern.fullmatch(path.name)],
-        key=lambda path: int(path.stem),
+        [path for path in novel_dir.iterdir() if path.is_file() and path.suffix.lower() == ".txt"],
+        key=lambda path: path.name.lower(),
     )
 
 
@@ -54,16 +55,18 @@ def parse_source_file(path: Path) -> SourceDocument:
     if not lines:
         raise ValueError(f"Source file is empty: {path}")
 
-    title = lines[0].strip() or path.stem
-    body_start = 1
+    has_explicit_title = len(lines) > 1 and lines[0].strip() and lines[1] == SEPARATOR_LINE
 
-    if len(lines) > 1 and lines[1].strip("=") == "":
-        body_start = 2
+    if has_explicit_title:
+        title = lines[0].strip()
+        body_lines = lines[2:]
+        while body_lines and not body_lines[0].strip():
+            body_lines.pop(0)
+        body = "\n".join(body_lines).strip()
+    else:
+        title = path.stem
+        body = raw_text.strip()
 
-    while body_start < len(lines) and not lines[body_start].strip():
-        body_start += 1
-
-    body = "\n".join(lines[body_start:]).strip()
     if not body:
         raise ValueError(f"Source body is empty: {path}")
 

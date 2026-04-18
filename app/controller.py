@@ -216,12 +216,9 @@ def prompt_for_source_files_with_ui(source_root: Path) -> list[Path]:
             status_message = "[ERROR] 3 또는 1~5 형식으로 입력해 주세요."
             continue
 
-        start_number, end_number = selection
-        chapter_files_by_number = {int(path.stem): path for path in chapter_files}
-        missing_numbers = [number for number in range(start_number, end_number + 1) if number not in chapter_files_by_number]
-        if missing_numbers:
-            missing_names = ", ".join(f"{number:04d}.txt" for number in missing_numbers)
-            status_message = f"[ERROR] 없는 파일이 있습니다: {missing_names}"
+        start_index, end_index = selection
+        if start_index < 1 or end_index > len(chapter_files):
+            status_message = f"[ERROR] 1~{len(chapter_files)} 범위 내로 입력해 주세요."
             continue
 
-        return [chapter_files_by_number[number] for number in range(start_number, end_number + 1)]
+        return chapter_files[start_index - 1 : end_index]

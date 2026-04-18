@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 import random
-import re
 import time
 from pathlib import Path
-from urllib.parse import urljoin
 
 import cloudscraper
 from bs4 import BeautifulSoup
 
-from app.config import get_runtime_settings
+from app.config import SEPARATOR_LINE, get_runtime_settings
+from app.crawler_sites import Chapter, resolve_extractor
 from app.ui import (
     clear_screen,
     parse_command,
@@ -21,17 +20,10 @@ from app.ui import (
 
 
 OUTPUT_PATH = get_runtime_settings().source_path
-Chapter = tuple[int, str, str]
 
 
 def _format_chapter_document(title: str, content: str) -> str:
-    return f"{title}\n{'=' * 60}\n\n{content}"
-
-
-def _format_combined_document(results: list[tuple[int, str, str]], novel_folder: str) -> str:
-    sections = [f"{'=' * 60}\n{title}\n{'=' * 60}\n\n{content}" for _num, title, content in results]
-    header = f"{novel_folder}\n{'=' * 60}\n총 {len(results)}화\n{'=' * 60}\n\n\n"
-    return header + "\n\n\n".join(sections) + "\n"
+    return f"{title}\n{SEPARATOR_LINE}\n\n{content}"
 
 
 def _filter_chapters(
@@ -77,7 +69,8 @@ def _parse_chapter_range(range_input: str) -> tuple[int | None, int | None, bool
 
 class NovelCrawler:
     def __init__(self, base_url: str):
-        self.base_url = base_url.rstrip("/") + "/"
+        self.extractor = resolve_extractor(base_url)
+        self.base_url = self.extractor.normalize_base_url(base_url)
         self.session = cloudscraper.create_scraper(
             browser={
                 "browser": "chrome",
@@ -85,15 +78,13 @@ class NovelCrawler:
                 "desktop": True,
             }
         )
-        self.session.cookies.set("over18", "yes", domain="syosetu.org")
-        self.session.cookies.set("over18", "yes", domain=".syosetu.org")
+        self.extractor.prepare_session(self.session)
 
         self.error_mode = "ask"
         self.retry_count = 3
         self.retry_delay = 3.0
         self.novel_title: str | None = None
         self.last_output_path: Path | None = None
-        self.last_combined_path: Path | None = None
         self.last_failed_count = 0
         self.last_success_count = 0
         self.last_total_count = 0
@@ -155,7 +146,7 @@ class NovelCrawler:
                     try:
                         wait_time = float(wait) if wait else 5.0
                     except ValueError:
-                        retry_status_message = "숫자 또는 /b만 입력해 주세요."
+                        retry_status_message = "숫자 또는 /b만 입력해주세요."
                         continue
 
                     clear_screen()
@@ -169,97 +160,30 @@ class NovelCrawler:
                 return None
 
             if choice == "4":
-                raise KeyboardInterrupt("사용자가 크롤링을 중단했습니다.")
+                raise KeyboardInterrupt("사용자가 작업을 중단했습니다.")
 
-            status_message = "잘못된 선택입니다. 다시 입력해 주세요."
+            status_message = "잘못된 선택입니다. 다시 입력해주세요."
 
     def get_chapter_links(self, prompt_on_error: bool = True) -> list[Chapter]:
         soup = self.get_page(self.base_url, prompt_on_error=prompt_on_error)
         if not soup:
             return []
 
-        self.novel_title = self._extract_novel_title(soup)
-        chapters: list[Chapter] = []
-
-        for link in soup.find_all("a", href=True):
-            href = link.get("href", "")
-            match = re.search(r"(?:\./)?(\d+)\.html$", href)
-            if not match:
-                continue
-
-            chapter_num = int(match.group(1))
-            chapter_title = link.get_text(strip=True) or f"제{chapter_num}화"
-            full_url = urljoin(self.base_url, href)
-            chapters.append((chapter_num, chapter_title, full_url))
-
-        seen: set[str] = set()
-        unique_chapters: list[Chapter] = []
-        for chapter in chapters:
-            if chapter[2] in seen:
-                continue
-            seen.add(chapter[2])
-            unique_chapters.append(chapter)
-
-        unique_chapters.sort(key=lambda item: item[0])
-        return unique_chapters
+        self.novel_title = self.extractor.extract_novel_title(soup)
+        return self.extractor.extract_chapter_links(self.base_url, soup, self.get_page)
 
     def extract_content(self, soup: BeautifulSoup) -> str:
         if not soup:
             return ""
-
-        selectors = [
-            {"id": "honbun"},
-            {"class_": "honbun"},
-            {"id": "novel_honbun"},
-            {"class_": "novel_view"},
-            {"id": "novel_view"},
-        ]
-
-        body_element = None
-        for selector in selectors:
-            body_element = soup.find("div", **selector)
-            if body_element:
-                break
-
-        if body_element:
-            for br in body_element.find_all("br"):
-                br.replace_with("\n")
-            for p in body_element.find_all("p"):
-                p.insert_after("\n")
-            content = body_element.get_text()
-        else:
-            print("[WARNING] 본문 컨테이너를 찾지 못했습니다. 대체 방법을 시도합니다...")
-            all_divs = soup.find_all("div")
-            if not all_divs:
-                return ""
-            longest_div = max(all_divs, key=lambda div: len(div.get_text()))
-            content = longest_div.get_text()
-
-        return self.clean_text(content)
+        return self.extractor.extract_content(soup)
 
     def clean_text(self, text: str) -> str:
-        text = text.replace("\r\n", "\n").replace("\r", "\n")
-        lines = [line.strip() for line in text.split("\n")]
-        text = "\n".join(lines)
-        text = re.sub(r"\n{3,}", "\n\n", text)
-        return text.strip()
+        return self.extractor.clean_text(text)
 
     def get_chapter_title(self, soup: BeautifulSoup) -> str:
         if not soup:
             return ""
-
-        title_selectors = [
-            ("h1", {"class_": "novel_subtitle"}),
-            ("h1", {}),
-            ("div", {"class_": "novel_subtitle"}),
-            ("span", {"class_": "novel_subtitle"}),
-        ]
-
-        for tag, attrs in title_selectors:
-            element = soup.find(tag, **attrs)
-            if element:
-                return element.get_text(strip=True)
-        return ""
+        return self.extractor.extract_chapter_title(soup)
 
     def crawl_all(
         self,
@@ -271,7 +195,7 @@ class NovelCrawler:
     ) -> list[tuple[int, str, str]]:
         if chapters is None:
             print(f"[INFO] 소설 페이지 분석 중: {self.base_url}")
-            print("[INFO] 메인 페이지 접속 중 (세션 초기화)...")
+            print("[INFO] 메인 페이지 접속 중...")
             main_soup = self.get_page(self.base_url)
             if not main_soup:
                 print("[ERROR] 메인 페이지에 접속할 수 없습니다.")
@@ -288,7 +212,6 @@ class NovelCrawler:
 
         save_path = self._get_novel_output_path(output_dir)
         self.last_output_path = save_path
-        self.last_combined_path = None
         self.last_failed_count = 0
         self.last_success_count = 0
         self.last_total_count = len(chapters)
@@ -341,50 +264,12 @@ class NovelCrawler:
                 actual_delay = delay + random.uniform(0.5, 1.5)
                 time.sleep(actual_delay)
 
-        if results:
-            self.last_combined_path = self._save_combined_file(
-                results,
-                save_path,
-                self.novel_title or "unknown_novel",
-            )
-
         self.last_failed_count = len(failed_chapters)
         self.last_success_count = len(results)
         return results
 
-    def _extract_novel_title(self, soup: BeautifulSoup) -> str:
-        if not soup:
-            return "unknown_novel"
-
-        title_selectors = [
-            ("title", {}),
-            ("h1", {}),
-            ("meta", {"property": "og:title"}),
-        ]
-
-        for tag, attrs in title_selectors:
-            if tag == "meta":
-                element = soup.find(tag, attrs)
-                if element and element.get("content"):
-                    title = re.split(r"\s*[-|]\s*", element.get("content"))[0].strip()
-                    if title:
-                        return self._sanitize_filename(title)
-                continue
-
-            element = soup.find(tag, **attrs)
-            if element:
-                title = re.split(r"\s*[-|]\s*", element.get_text(strip=True))[0].strip()
-                if title:
-                    return self._sanitize_filename(title)
-
-        return "unknown_novel"
-
     def _sanitize_filename(self, filename: str) -> str:
-        filename = re.sub(r'[<>:"/\\|?*]', "", filename)
-        filename = filename.strip(". ")
-        if len(filename) > 100:
-            filename = filename[:100]
-        return filename or "unknown_novel"
+        return self.extractor.sanitize_filename(filename)
 
     def _get_novel_output_path(self, output_dir: Path) -> Path:
         novel_folder = self.novel_title or "unknown_novel"
@@ -395,18 +280,6 @@ class NovelCrawler:
     def _save_chapter_file(self, num: int, title: str, content: str, output_path: Path) -> None:
         filepath = output_path / f"{num:04d}.txt"
         filepath.write_text(_format_chapter_document(title, content), encoding="utf-8")
-
-    def _save_combined_file(
-        self,
-        results: list[tuple[int, str, str]],
-        output_path: Path,
-        novel_folder: str,
-    ) -> Path:
-        start_num = min(num for num, _, _ in results)
-        end_num = max(num for num, _, _ in results)
-        combined_path = output_path / f"({start_num:04d}~{end_num:04d}){novel_folder}.txt"
-        combined_path.write_text(_format_combined_document(results, novel_folder), encoding="utf-8")
-        return combined_path
 
 
 def main() -> int:
@@ -431,18 +304,23 @@ def main() -> int:
                     return 130
 
                 if not novel_url:
-                    status_message = "[ERROR] URL을 입력해 주세요."
+                    status_message = "[ERROR] URL을 입력해주세요."
                     continue
 
                 status_message = "[RUN] URL 분석 중..."
                 render_crawler_screen(step, status_message, founded)
-                crawler = NovelCrawler(novel_url)
+                try:
+                    crawler = NovelCrawler(novel_url)
+                except ValueError as error:
+                    status_message = f"[ERROR] {error}"
+                    continue
+
                 chapters = crawler.get_chapter_links(prompt_on_error=False)
                 start_chapter = None
                 end_chapter = None
 
                 if not chapters:
-                    status_message = "[ERROR] 챕터를 찾을 수 없습니다. URL을 다시 확인해 주세요."
+                    status_message = "[ERROR] 챕터를 찾을 수 없습니다. URL을 다시 확인해주세요."
                     continue
 
                 step = "range"
@@ -466,7 +344,7 @@ def main() -> int:
 
                 start_chapter, end_chapter, is_valid = _parse_chapter_range(range_input)
                 if not is_valid:
-                    status_message = "[ERROR] 범위 형식이 잘못되었습니다. 다시 입력해 주세요."
+                    status_message = "[ERROR] 범위 형식이 잘못되었습니다. 다시 입력해주세요."
                     continue
 
                 filtered = _filter_chapters(chapters, start_chapter, end_chapter)
@@ -497,7 +375,7 @@ def main() -> int:
                 try:
                     delay = float(delay_input) if delay_input else 1.0
                 except ValueError:
-                    status_message = "[ERROR] 요청 간격은 숫자로 입력해 주세요."
+                    status_message = "[ERROR] 요청 간격은 숫자로 입력해주세요."
                     continue
 
                 try:

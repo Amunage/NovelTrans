@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Protocol
 
-from app.settings import SEPARATOR_LINE, TRANSLATION_INSTRUCTIONS
+from app.config import SEPARATOR_LINE, TRANSLATION_INSTRUCTIONS
 from app.utils import SourceDocument, normalize_translation, print_progress, sanitize_model_text, split_into_chunks
 
 
@@ -36,7 +36,15 @@ class TranslationConfig:
 
 
 class TranslatorClient(Protocol):
-    def translate(self, prompt: str, *, temperature: float, top_p: float, n_predict: int) -> str:
+    def translate(
+        self,
+        prompt: str,
+        *,
+        temperature: float,
+        top_p: float,
+        n_predict: int,
+        wait_callback: Callable[[], None] | None = None,
+    ) -> str:
         ...
 
 
@@ -190,6 +198,11 @@ def translate_document(
             temperature=config.draft_temperature,
             top_p=config.top_p,
             n_predict=max_tokens,
+            wait_callback=(
+                (lambda: progress_callback("초벌 번역", index - 1, total_items, None))
+                if progress_callback is not None
+                else None
+            ),
         )
         translated = normalize_translation(response)
         if not translated:

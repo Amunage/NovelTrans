@@ -5,6 +5,7 @@ import json
 import re
 import socket
 import subprocess
+import threading
 import time
 from pathlib import Path
 from urllib import error, request
@@ -76,7 +77,15 @@ class LlamaCppServerClient:
             "stream": False,
         }
 
-    def translate(self, prompt: str, *, temperature: float, top_p: float, n_predict: int) -> str:
+    def translate(
+        self,
+        prompt: str,
+        *,
+        temperature: float,
+        top_p: float,
+        n_predict: int,
+        wait_callback=None,
+    ) -> str:
         payload = self._build_payload(prompt, temperature=temperature, top_p=top_p, n_predict=n_predict)
 
         def send(payload_to_send: dict) -> str:
@@ -90,8 +99,31 @@ class LlamaCppServerClient:
             with request.urlopen(req, timeout=self.timeout) as response:
                 return response.read().decode("utf-8")
 
+        def send_with_wait(payload_to_send: dict) -> str:
+            result: dict[str, str] = {}
+            failure: dict[str, BaseException] = {}
+
+            def runner() -> None:
+                try:
+                    result["response_body"] = send(payload_to_send)
+                except BaseException as exc:  # noqa: BLE001
+                    failure["error"] = exc
+
+            worker = threading.Thread(target=runner, daemon=True)
+            worker.start()
+
+            while worker.is_alive():
+                worker.join(timeout=1.0)
+                if worker.is_alive() and wait_callback is not None:
+                    wait_callback()
+
+            if "error" in failure:
+                raise failure["error"]
+
+            return result["response_body"]
+
         try:
-            response_body = send(payload)
+            response_body = send_with_wait(payload)
         except error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
             if exc.code == 500 and ("<|channel>" in detail or "<channel|>" in detail or "Failed to parse input" in detail):
@@ -102,7 +134,7 @@ class LlamaCppServerClient:
                     n_predict=n_predict,
                 )
                 try:
-                    response_body = send(retry_payload)
+                    response_body = send_with_wait(retry_payload)
                 except error.HTTPError as retry_exc:
                     retry_detail = retry_exc.read().decode("utf-8", errors="replace")
                     raise RuntimeError(f"llama-server returned HTTP {retry_exc.code}: {retry_detail}") from retry_exc
@@ -230,6 +262,7 @@ def parse_args() -> TranslationConfig:
 
 def main() -> int:
     server_process = None
+    translation_started_at = 0.0
 
     try:
         config = parse_args()
@@ -243,16 +276,18 @@ def main() -> int:
         if not selected_source_files:
             return 0
 
+        translation_started_at = time.monotonic()
         render_translation_progress_screen(
             file_index=1,
             total_files=len(selected_source_files),
             stage="모델 로드",
             current=0,
             total=1,
+            elapsed_seconds=0,
             source_file=selected_source_files[0],
             title="",
             output_path=config.output_root,
-            status_message="[INFO] 모델 로드 중...",
+            status_message=None,
         )
 
         server_process = start_llama_server(config)
@@ -265,10 +300,11 @@ def main() -> int:
                 stage="모델 로드",
                 current=min(elapsed, timeout),
                 total=max(timeout, 1),
+                elapsed_seconds=int(time.monotonic() - translation_started_at),
                 source_file=selected_source_files[0],
                 title="",
                 output_path=config.output_root,
-                status_message=f"[INFO] 모델 로드 중...",
+                status_message=None
             ),
         )
 
@@ -290,6 +326,7 @@ def main() -> int:
                     stage=stage,
                     current=current,
                     total=total,
+                    elapsed_seconds=int(time.monotonic() - translation_started_at),
                     source_file=source_file,
                     title=document.title,
                     output_path=output_path,
