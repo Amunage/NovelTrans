@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.config import get_env_settings_items, get_runtime_settings, update_env_setting
+from app.config import get_env_settings_items, get_runtime_settings, log_runtime_event, update_env_setting
 from app.setup import run_model_download_setup
 from app.translation import TranslationConfig
 from app.ui import (
@@ -127,7 +127,12 @@ def run_settings_menu() -> str | None:
 
         if choice == "2":
             render_settings_menu("[INFO] 컴퓨터 사양을 분석하는 중입니다...")
-            status_message = run_model_download_setup(force_prompt=True)
+            try:
+                log_runtime_event("settings menu | manual model download requested")
+                status_message = run_model_download_setup(force_prompt=True)
+            except Exception as exc:
+                log_runtime_event(f"settings menu | model download error={exc!r}")
+                status_message = f"[ERROR] 모델 다운로드 중 오류가 발생했습니다: {exc}"
             continue
 
         status_message = "[ERROR] 잘못된 입력입니다."

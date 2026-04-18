@@ -1,19 +1,46 @@
 from __future__ import annotations
 
+import ctypes
 import json
 import os
 import sys
+import tempfile
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
+
+from app.utils import find_chapter_files, find_source_novels
+
+
+def _get_windows_executable_dir() -> Path | None:
+    if os.name != "nt":
+        return None
+
+    buffer_size = 32768
+    buffer = ctypes.create_unicode_buffer(buffer_size)
+    length = ctypes.windll.kernel32.GetModuleFileNameW(None, buffer, buffer_size)
+    if length <= 0:
+        return None
+    return Path(buffer.value).resolve().parent
 
 
 def get_app_root() -> Path:
     if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
+        windows_executable_dir = _get_windows_executable_dir()
+        if windows_executable_dir is not None and windows_executable_dir.exists():
+            return windows_executable_dir
+
+        argv0 = Path(sys.argv[0]).resolve().parent if sys.argv and sys.argv[0] else None
+        executable_dir = Path(sys.executable).resolve().parent
+        if argv0 is not None and argv0.exists():
+            return argv0
+        return executable_dir
     return Path(__file__).resolve().parents[1]
 
 
 APP_ROOT = get_app_root()
+LOG_FILE_NAME = "noveltrans.log"
+_LOGGING_INITIALIZED = False
 DEFAULT_MODEL_FILENAME = "gemma-4-26B-A4B-it-UD-Q4_K_M.gguf"
 EDITABLE_ENV_KEYS = [
     "LLAMA_SERVER_PATH",
@@ -73,6 +100,42 @@ class RuntimeSettings:
     n_predict: int
     ctx_size: int
     startup_timeout: int
+
+
+def get_log_path() -> Path:
+    primary_path = APP_ROOT / LOG_FILE_NAME
+    try:
+        primary_path.parent.mkdir(parents=True, exist_ok=True)
+        return primary_path
+    except OSError:
+        fallback_dir = Path(tempfile.gettempdir()) / "noveltrans"
+        fallback_dir.mkdir(parents=True, exist_ok=True)
+        return fallback_dir / LOG_FILE_NAME
+
+
+def log_runtime_event(message: str) -> None:
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_path = get_log_path()
+    try:
+        with log_path.open("a", encoding="utf-8") as log_file:
+            log_file.write(f"[{timestamp}] {message}\n")
+    except OSError:
+        pass
+
+
+def initialize_runtime_logging() -> None:
+    global _LOGGING_INITIALIZED
+
+    if _LOGGING_INITIALIZED:
+        return
+
+    log_path = get_log_path()
+    try:
+        log_path.write_text("", encoding="utf-8")
+    except OSError:
+        pass
+
+    _LOGGING_INITIALIZED = True
 
 
 def _warn_invalid_env(name: str, value: str, default: object) -> None:
@@ -209,19 +272,37 @@ def update_env_setting(key: str, value: str) -> None:
     update_env_value(key, value.strip())
 
 
-def get_configured_model_path(env_path: Path | None = None) -> Path:
+def _get_configured_path(key: str, env_path: Path | None = None) -> Path:
     env_values = read_env_file(env_path)
-    raw_model_path = env_values.get("LLAMA_MODEL_PATH", DEFAULT_ENV_VALUES["LLAMA_MODEL_PATH"])
-    model_path = Path(raw_model_path)
-    if model_path.is_absolute():
-        return model_path
-    return APP_ROOT / model_path
+    raw_path = env_values.get(key, DEFAULT_ENV_VALUES[key])
+    resolved_path = Path(raw_path)
+    if resolved_path.is_absolute():
+        return resolved_path
+    return APP_ROOT / resolved_path
+
+
+def get_configured_model_path(env_path: Path | None = None) -> Path:
+    return _get_configured_path("LLAMA_MODEL_PATH", env_path)
+
+
+def get_configured_source_path(env_path: Path | None = None) -> Path:
+    return _get_configured_path("SOURCE_PATH", env_path)
 
 
 def get_translation_block_reason() -> str | None:
     model_path = get_configured_model_path()
     if not model_path.is_file():
-        return f"[ERROR] GGUF 모델이 없습니다: {model_path}"
+        return f"[ERROR] GGUF 모델이 없습니다. 설정을 확인해주세요."
+
+    source_path = get_configured_source_path()
+    if not source_path.exists() or not source_path.is_dir():
+        return "[ERROR] 원문 폴더가 없습니다. 설정을 확인해주세요."
+
+    novel_dirs = find_source_novels(source_path)
+    has_source_files = any(find_chapter_files(novel_dir) for novel_dir in novel_dirs)
+    if not has_source_files:
+        return "[ERROR] 번역할 원문 txt 파일이 없습니다."
+
     return None
 
 
@@ -247,3 +328,8 @@ def get_runtime_settings() -> RuntimeSettings:
 
 
 load_dotenv()
+initialize_runtime_logging()
+log_runtime_event(
+    f"app init | frozen={getattr(sys, 'frozen', False)} | app_root={APP_ROOT} | "
+    f"executable={getattr(sys, 'executable', '')} | argv0={sys.argv[0] if sys.argv else ''} | log_path={get_log_path()}"
+)

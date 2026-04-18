@@ -20,9 +20,10 @@ from app.config import (
     DEFAULT_ENV_CONTENT,
     DEFAULT_GLOSSARY_CONTENT,
     get_configured_model_path,
+    log_runtime_event,
     update_env_value,
 )
-from app.ui import prompt_for_model_download
+from app.ui import prompt_for_model_download, render_download_progress_screen
 
 
 GITHUB_RELEASES_API_URL = "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=5"
@@ -81,15 +82,28 @@ MODEL_CANDIDATES = [
 ]
 
 
+class DownloadCancelledError(Exception):
+    def __init__(self, asset_name: str):
+        super().__init__(f"Download cancelled: {asset_name}")
+        self.asset_name = asset_name
+
+
 def ensure_runtime_setup() -> None:
+    log_runtime_event(f"ensure_runtime_setup start | app_root={APP_ROOT}")
     ensure_default_project_files()
     ensure_llama_cpp_runtime(APP_ROOT)
+    log_runtime_event("ensure_runtime_setup done")
 
 
 def ensure_default_project_files() -> None:
     env_path = APP_ROOT / ".env"
     if not env_path.exists():
         env_path.write_text(DEFAULT_ENV_CONTENT, encoding="utf-8")
+        log_runtime_event(f"created env file | path={env_path}")
+
+    (APP_ROOT / "llama").mkdir(parents=True, exist_ok=True)
+    (APP_ROOT / "models").mkdir(parents=True, exist_ok=True)
+    log_runtime_event(f"ensured runtime dirs | llama={APP_ROOT / 'llama'} | models={APP_ROOT / 'models'}")
 
     glossary_dir = APP_ROOT / "glossary"
     glossary_dir.mkdir(parents=True, exist_ok=True)
@@ -97,6 +111,7 @@ def ensure_default_project_files() -> None:
     glossary_path = glossary_dir / "glossary.json"
     if not glossary_path.exists():
         glossary_path.write_text(DEFAULT_GLOSSARY_CONTENT, encoding="utf-8")
+        log_runtime_event(f"created glossary file | path={glossary_path}")
 
 
 def run_model_download_setup(force_prompt: bool = True) -> str:
@@ -110,7 +125,9 @@ def ensure_llama_cpp_runtime(app_root: Path) -> None:
 
     runtime_dir = app_root / "llama"
     server_path = runtime_dir / "llama-server.exe"
+    log_runtime_event(f"ensure_llama_cpp_runtime check | runtime_dir={runtime_dir} | server_path={server_path}")
     if server_path.is_file():
+        log_runtime_event("ensure_llama_cpp_runtime skipped | existing server found")
         return
 
     if platform.system() != "Windows":
@@ -125,9 +142,14 @@ def ensure_llama_cpp_runtime(app_root: Path) -> None:
         install_llama_cpp_assets(assets, runtime_dir)
         write_runtime_metadata(runtime_dir, release["tag_name"], assets, cuda_version)
         installed_assets = ", ".join(str(asset["name"]) for asset in assets)
-        print(f"[INFO] llama.cpp runtime installed: {installed_assets}")
+        print(f"[INFO] llama.cpp runtime installed: {installed_assets} -> {runtime_dir}")
+        log_runtime_event(f"llama runtime installed | assets={installed_assets} | runtime_dir={runtime_dir}")
+    except DownloadCancelledError as exc:
+        print(f"[INFO] llama.cpp runtime download cancelled: {exc.asset_name}")
+        log_runtime_event(f"llama runtime download cancelled | asset={exc.asset_name}")
     except Exception as exc:
         print(f"[WARN] llama.cpp runtime auto install skipped: {exc}")
+        log_runtime_event(f"llama runtime auto install skipped | error={exc!r}")
 
 
 def ensure_gemma_model_runtime(app_root: Path, env_path: Path, *, force_prompt: bool = False) -> str:
@@ -135,6 +157,10 @@ def ensure_gemma_model_runtime(app_root: Path, env_path: Path, *, force_prompt: 
         return "[INFO] 모델 자동 다운로드가 비활성화되어 있습니다."
 
     configured_model_path = get_configured_model_path(env_path)
+    log_runtime_event(
+        f"ensure_gemma_model_runtime start | app_root={app_root} | env_path={env_path} | "
+        f"configured_model_path={configured_model_path} | force_prompt={force_prompt}"
+    )
     if configured_model_path.is_file() and not force_prompt:
         return f"[INFO] 현재 모델 사용 중: {configured_model_path.name}"
 
@@ -143,6 +169,7 @@ def ensure_gemma_model_runtime(app_root: Path, env_path: Path, *, force_prompt: 
 
     models_dir = app_root / "models"
     models_dir.mkdir(parents=True, exist_ok=True)
+    log_runtime_event(f"ensure_gemma_model_runtime models_dir={models_dir}")
 
     try:
         system_specs = detect_system_specs(models_dir)
@@ -158,7 +185,10 @@ def ensure_gemma_model_runtime(app_root: Path, env_path: Path, *, force_prompt: 
     if selected_option is None:
         return "[INFO] Gemma 모델 다운로드를 취소했습니다."
 
-    return install_selected_model_option(app_root, env_path, models_dir, selected_option, system_specs)
+    try:
+        return install_selected_model_option(app_root, env_path, models_dir, selected_option, system_specs)
+    except DownloadCancelledError as exc:
+        return f"[INFO] 다운로드를 취소했습니다: {exc.asset_name}"
 
 
 def detect_system_specs(models_dir: Path) -> dict[str, object]:
@@ -283,6 +313,10 @@ def install_selected_model_option(
     system_specs: dict[str, object],
 ) -> str:
     model_destination = models_dir / str(selected_option["filename"])
+    log_runtime_event(
+        f"install_selected_model_option start | model={selected_option['filename']} | "
+        f"model_destination={model_destination} | models_dir={models_dir}"
+    )
     if not model_destination.is_file():
         download_file(
             build_huggingface_download_url(str(selected_option["filename"])),
@@ -291,10 +325,20 @@ def install_selected_model_option(
             1,
             1,
             request_headers=HUGGING_FACE_HEADERS,
+            render_progress=lambda asset_name, percent, speed_mbps: _render_model_download_progress(
+                asset_name,
+                model_destination,
+                percent,
+                speed_mbps,
+            ),
         )
 
-    update_env_value("LLAMA_MODEL_PATH", to_relative_env_path(model_destination, app_root), env_path)
     write_model_metadata(models_dir, selected_option, system_specs)
+    update_env_value("LLAMA_MODEL_PATH", to_relative_env_path(model_destination, app_root), env_path)
+    log_runtime_event(
+        f"install_selected_model_option complete | model={selected_option['filename']} | "
+        f"saved_to={model_destination} | env_path={env_path}"
+    )
     return f"[INFO] Gemma 모델 준비 완료: {selected_option['filename']}"
 
 
@@ -429,6 +473,7 @@ def find_asset_by_selector(assets: list[dict[str, object]], selector: str) -> di
 
 def install_llama_cpp_assets(assets: list[dict[str, object]], runtime_dir: Path) -> None:
     runtime_dir.mkdir(parents=True, exist_ok=True)
+    log_runtime_event(f"install_llama_cpp_assets start | runtime_dir={runtime_dir} | assets={len(assets)}")
 
     with tempfile.TemporaryDirectory(prefix="noveltrans-llama-setup-") as temp_dir_str:
         temp_dir = Path(temp_dir_str)
@@ -445,10 +490,19 @@ def install_llama_cpp_assets(assets: list[dict[str, object]], runtime_dir: Path)
                 index,
                 len(assets),
                 request_headers=GITHUB_API_HEADERS,
+                render_progress=lambda asset_name, percent, speed_mbps: _render_llama_runtime_download_progress(
+                    asset_name,
+                    runtime_dir,
+                    percent,
+                    speed_mbps,
+                ),
             )
 
             with ZipFile(archive_path) as archive:
                 archive.extractall(extract_dir)
+            log_runtime_event(
+                f"llama asset extracted | asset={asset_name} | archive_path={archive_path} | extract_dir={extract_dir}"
+            )
 
             source_root = get_single_root_or_self(extract_dir)
             for child in source_root.iterdir():
@@ -457,6 +511,7 @@ def install_llama_cpp_assets(assets: list[dict[str, object]], runtime_dir: Path)
                     shutil.copytree(child, destination, dirs_exist_ok=True)
                 else:
                     shutil.copy2(child, destination)
+            log_runtime_event(f"llama asset copied | asset={asset_name} | runtime_dir={runtime_dir}")
 
     server_path = runtime_dir / "llama-server.exe"
     if not server_path.is_file():
@@ -470,16 +525,25 @@ def download_file(
     asset_index: int,
     total_assets: int,
     request_headers: dict[str, str] | None = None,
+    render_progress=None,
 ) -> None:
     request = urllib.request.Request(download_url, headers=request_headers or GITHUB_API_HEADERS)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temp_destination = destination.with_suffix(destination.suffix + ".part")
+    log_runtime_event(
+        f"download start | asset={asset_name} | destination={destination} | temp_destination={temp_destination} | "
+        f"url={download_url}"
+    )
     try:
         os.system("cls")
-        with urllib.request.urlopen(request, timeout=120) as response, destination.open("wb") as output:
+        with urllib.request.urlopen(request, timeout=120) as response, temp_destination.open("wb") as output:
             total_size = _get_content_length(response)
             downloaded = 0
             next_report_percent = 0
             last_unknown_report_at = 0.0
-            print(f"[INFO] Downloading llama.cpp asset {asset_index}/{total_assets}: {asset_name}")
+            started_at = time.monotonic()
+            if render_progress is None:
+                print(f"[INFO] Downloading llama.cpp asset {asset_index}/{total_assets}: {asset_name}")
 
             while True:
                 chunk = response.read(1024 * 1024)
@@ -494,16 +558,37 @@ def download_file(
                     total_size,
                     next_report_percent,
                     last_unknown_report_at,
+                    started_at,
+                    render_progress,
                 )
 
-            if total_size is None:
+        temp_destination.replace(destination)
+        log_runtime_event(
+            f"download complete | asset={asset_name} | destination={destination} | bytes={downloaded}"
+        )
+
+        if total_size is None:
+            if render_progress is None:
                 _finish_progress_line(f"[INFO] Download complete: {asset_name} ({_format_size(downloaded)})")
-            elif next_report_percent <= 100:
+        elif next_report_percent <= 100:
+            if render_progress is not None:
+                render_progress(asset_name, 100, downloaded / (1024 * 1024) / max(time.monotonic() - started_at, 0.001))
+            else:
                 _finish_progress_line(
                     f"[INFO] Download complete: {asset_name} (100%, {_format_size(downloaded)})"
                 )
+    except KeyboardInterrupt as exc:
+        temp_destination.unlink(missing_ok=True)
+        log_runtime_event(f"download cancelled | asset={asset_name} | temp_destination={temp_destination}")
+        raise DownloadCancelledError(asset_name) from exc
     except urllib.error.URLError as exc:
+        temp_destination.unlink(missing_ok=True)
+        log_runtime_event(f"download urlerror | asset={asset_name} | error={exc!r}")
         raise RuntimeError(f"Failed to download {download_url}") from exc
+    except Exception as exc:
+        temp_destination.unlink(missing_ok=True)
+        log_runtime_event(f"download failed | asset={asset_name} | error={exc!r}")
+        raise
 
 
 def get_single_root_or_self(path: Path) -> Path:
@@ -579,23 +664,74 @@ def _report_download_progress(
     total_size: int | None,
     next_report_percent: int,
     last_unknown_report_at: float,
+    started_at: float,
+    render_progress,
 ) -> tuple[int, float]:
+    elapsed = max(time.monotonic() - started_at, 0.001)
+    speed_mbps = downloaded / (1024 * 1024) / elapsed
+
     if total_size is None or total_size <= 0:
         now = time.monotonic()
         if now - last_unknown_report_at >= 0.25:
-            _render_progress_line(f"[INFO] {asset_name}: {_format_size(downloaded)} downloaded...")
+            if render_progress is not None:
+                render_progress(asset_name, 0, speed_mbps)
+            else:
+                _render_progress_line(f"[INFO] {asset_name}: {_format_size(downloaded)} downloaded...")
             last_unknown_report_at = now
         return next_report_percent, last_unknown_report_at
 
     percent = int(downloaded * 100 / total_size)
+    if render_progress is not None:
+        if percent >= next_report_percent and next_report_percent <= 100:
+            render_progress(asset_name, percent, speed_mbps)
+            next_report_percent = percent + 1
+        return next_report_percent, last_unknown_report_at
+
     while percent >= next_report_percent and next_report_percent <= 100:
-        _render_progress_line(
-            f"[INFO] {asset_name}: {next_report_percent}% "
-            f"({_format_size(downloaded)} / {_format_size(total_size)})"
-        )
+        if render_progress is not None:
+            render_progress(asset_name, next_report_percent, speed_mbps)
+        else:
+            _render_progress_line(
+                f"[INFO] {asset_name}: {next_report_percent}% "
+                f"({_format_size(downloaded)} / {_format_size(total_size)})"
+            )
         next_report_percent += 10
 
     return next_report_percent, last_unknown_report_at
+
+
+def _render_model_download_progress(
+    asset_name: str,
+    destination_path: Path,
+    percent: int,
+    speed_mbps: float | None,
+) -> None:
+    render_download_progress_screen(
+        title="Gemma 4 모델 자동 다운로드",
+        message="모델을 다운로드 중입니다.",
+        item_label="모델",
+        item_name=asset_name,
+        destination_path=str(destination_path),
+        percent=max(0, min(percent, 100)),
+        speed_mbps=speed_mbps,
+    )
+
+
+def _render_llama_runtime_download_progress(
+    asset_name: str,
+    destination_path: Path,
+    percent: int,
+    speed_mbps: float | None,
+) -> None:
+    render_download_progress_screen(
+        title="llama.cpp 런타임 자동 다운로드",
+        message="런타임을 다운로드 중입니다.",
+        item_label="파일",
+        item_name=asset_name,
+        destination_path=str(destination_path),
+        percent=max(0, min(percent, 100)),
+        speed_mbps=speed_mbps,
+    )
 
 
 def _format_size(size_in_bytes: int) -> str:

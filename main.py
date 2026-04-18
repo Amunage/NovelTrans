@@ -3,11 +3,9 @@ from __future__ import annotations
 import os
 import sys
 
-from app.config import get_translation_block_reason
+from app.config import get_log_path, get_translation_block_reason, log_runtime_event
 from app.controller import run_settings_menu
 from app.setup import ensure_runtime_setup
-
-ensure_runtime_setup()
 
 from app.client import main as translation_main
 from app.crawler import main as crawler_main
@@ -16,6 +14,8 @@ from app.ui import prompt_main_menu
 
 def main() -> int:
     try:
+        log_runtime_event(f"main start | log_path={get_log_path()}")
+        ensure_runtime_setup()
         status_message = None
 
         while True:
@@ -49,6 +49,7 @@ def main() -> int:
 
             status_message = "[ERROR] 잘못된 입력입니다."
     except KeyboardInterrupt:
+        log_runtime_event("main cancelled by user")
         os.system("cls")
         print("\n[INFO] 사용자가 작업을 중단했습니다.")
         return 130

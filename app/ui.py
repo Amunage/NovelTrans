@@ -317,6 +317,29 @@ def render_translation_complete_screen(
     print("-" * 60)
 
 
+def render_download_progress_screen(
+    *,
+    title: str,
+    message: str,
+    item_label: str,
+    item_name: str,
+    destination_path: str,
+    percent: int,
+    speed_mbps: float | None = None,
+) -> None:
+    clear_screen()
+    _print_header(title)
+    print(message)
+    print("-" * 60)
+    print(f"{item_label}: {item_name}")
+    print(f"저장 위치: {destination_path}")
+    speed_text = f"{speed_mbps:.1f} MB/s" if speed_mbps is not None else "속도 측정 중..."
+    print(f"다운로드: {_build_progress_bar(percent, 100)} {percent}% ({speed_text})")
+    print("-" * 60)
+    print("Ctrl+C: 다운로드 취소")
+    print("-" * 60)
+
+
 def prompt_for_model_download(
     system_specs: dict[str, object],
     model_options: list[dict[str, object]],
