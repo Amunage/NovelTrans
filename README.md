@@ -4,6 +4,21 @@
 
 ## 빠른 사용법
 
+## 지원하는 웹소설 사이트
+
+- `syosetu.org`
+  - 예시: `https://syosetu.org/novel/.../`
+- `syosetu.com` 계열
+  - 지원 도메인: `ncode.syosetu.com`, `novel18.syosetu.com`, `novelcom.syosetu.com`, `noc.syosetu.com`, `mnlt.syosetu.com`
+  - 예시: `https://ncode.syosetu.com/n1234ab/`
+- `kakuyomu.jp`
+  - 예시: `https://kakuyomu.jp/works/...`
+- `pixiv.net` 소설
+  - 시리즈 예시: `https://www.pixiv.net/novel/series/...`
+  - 개별 회차 / 단편 예시: `https://www.pixiv.net/novel/show.php?id=...`
+
+크롤러에서 위 URL을 입력하면 사이트를 자동으로 인식합니다.
+
 ### 1. 실행 파일 배포본 사용
 
 1. `dist/noveltrans.exe`를 원하는 폴더에 둡니다.

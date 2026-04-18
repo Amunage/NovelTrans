@@ -2,16 +2,18 @@ from __future__ import annotations
 
 from urllib.parse import urlparse
 
-from app.crawler_sites.base import Chapter, SiteExtractor
-from app.crawler_sites.kakuyomu import KakuyomuExtractor
-from app.crawler_sites.narou import NarouExtractor
-from app.crawler_sites.syosetu_org import SyosetuOrgExtractor
+from app.sites.base import Chapter, SiteExtractor
+from app.sites.kakuyomu import KakuyomuExtractor
+from app.sites.narou import NarouExtractor
+from app.sites.pixiv import PixivExtractor
+from app.sites.syosetu_org import SyosetuOrgExtractor
 
 
 EXTRACTORS: tuple[type[SiteExtractor], ...] = (
     SyosetuOrgExtractor,
     NarouExtractor,
     KakuyomuExtractor,
+    PixivExtractor,
 )
 
 

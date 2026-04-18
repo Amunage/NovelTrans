@@ -4,7 +4,7 @@ import re
 
 from bs4 import BeautifulSoup
 
-from app.crawler_sites.base import Chapter, SiteExtractor
+from app.sites.base import Chapter, SiteExtractor
 
 
 class KakuyomuExtractor(SiteExtractor):

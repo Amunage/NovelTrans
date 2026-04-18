@@ -8,7 +8,7 @@ import cloudscraper
 from bs4 import BeautifulSoup
 
 from app.config import SEPARATOR_LINE, get_runtime_settings
-from app.crawler_sites import Chapter, resolve_extractor
+from app.sites import Chapter, resolve_extractor
 from app.ui import (
     clear_screen,
     parse_command,
@@ -78,7 +78,9 @@ class NovelCrawler:
                 "desktop": True,
             }
         )
-        self.extractor.prepare_session(self.session)
+        prepared_session = self.extractor.prepare_session(self.session)
+        if prepared_session is not None:
+            self.session = prepared_session
 
         self.error_mode = "ask"
         self.retry_count = 3
