@@ -59,7 +59,7 @@ def render_main_menu(status_message: str | None = None) -> None:
     _print_header("메인 메뉴")
     print("원하는 작업 번호를 입력해 주세요.")
     print("-" * 60)
-    print("[1] 크롤링")
+    print("[1] 추출")
     print("[2] 번역")
     print("[9] 설정")
     print("[0] 종료")
@@ -140,7 +140,7 @@ def render_crawler_screen(
     chapters: Sequence[ChapterLike] | None = None,
 ) -> None:
     clear_screen()
-    _print_header("크롤링")
+    _print_header("추출")
     print("/b 돌아가기  /m 메인메뉴")
     print("-" * 60)
 
@@ -149,7 +149,7 @@ def render_crawler_screen(
         print("(예: https://syosetu.org/novel/267236/)")
     elif step == "range" and chapters:
         print(f"발견 챕터: {len(chapters)}개 ({chapters[0][0]}~{chapters[-1][0]})")
-        print("크롤링 범위를 입력해 주세요. (예: 3~15, 미입력 시 전체)")
+        print("추출 범위를 입력해 주세요. (예: 3~15, 미입력 시 전체)")
     elif step == "delay" and chapters:
         print(f"대상 챕터: {len(chapters)}개 ({chapters[0][0]}~{chapters[-1][0]})")
         print("요청 간격을 입력해 주세요. (미입력 시 기본=1.0, 빠름=0.5, 안전=2.0)")
@@ -166,7 +166,7 @@ def render_crawler_error_screen(
     waiting_for_retry: bool = False,
 ) -> None:
     clear_screen()
-    _print_header("크롤링 오류")
+    _print_header("추출 오류")
     print(f"URL: {url}")
     print(f"오류: {error}")
     print("-" * 60)
@@ -183,7 +183,7 @@ def render_crawler_error_screen(
         print("  [1] 이 챕터 건너뛰고 계속 진행")
         print("  [2] 이 챕터 다시 시도")
         print("  [3] 이후 오류는 모두 자동 건너뛰기")
-        print("  [4] 크롤링 중단")
+        print("  [4] 추출 중단")
 
 
 def render_crawl_progress_screen(
@@ -197,7 +197,7 @@ def render_crawl_progress_screen(
     failed_count: int = 0,
 ) -> None:
     clear_screen()
-    _print_header("크롤링")
+    _print_header("추출")
     if chapters:
         print(f"대상 챕터: {len(chapters)}개 ({chapters[0][0]}~{chapters[-1][0]})")
     print("-" * 60)
@@ -220,8 +220,8 @@ def render_crawl_complete_screen(
     status_message: str | None = None,
 ) -> None:
     clear_screen()
-    _print_header("크롤링")
-    print("크롤링 완료. 엔터를 누르면 메인 메뉴로 돌아갑니다.")
+    _print_header("추출")
+    print("추출 완료. 엔터를 누르면 메인 메뉴로 돌아갑니다.")
     print("-" * 60)
     print(f"성공: {success_count}/{total}")
     print(f"실패: {failed_count}개")
