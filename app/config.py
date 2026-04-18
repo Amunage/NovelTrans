@@ -1,0 +1,249 @@
+from __future__ import annotations
+
+import json
+import os
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+
+def get_app_root() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parents[1]
+
+
+APP_ROOT = get_app_root()
+DEFAULT_MODEL_FILENAME = "gemma-4-26B-A4B-it-UD-Q4_K_M.gguf"
+EDITABLE_ENV_KEYS = [
+    "LLAMA_SERVER_PATH",
+    "LLAMA_MODEL_PATH",
+    "GLOSSARY_PATH",
+    "SOURCE_PATH",
+    "OUTPUT_ROOT",
+    "SERVER_URL",
+    "MAX_CHARS",
+    "TIMEOUT",
+    "DRAFT_TEMPERATURE",
+    "REFINE_TEMPERATURE",
+    "REFINE_ENABLED",
+    "TOP_P",
+    "N_PREDICT",
+    "CTX_SIZE",
+    "STARTUP_TIMEOUT",
+]
+DEFAULT_ENV_VALUES = {
+    "LLAMA_SERVER_PATH": "llama/llama-server.exe",
+    "LLAMA_MODEL_PATH": f"models/{DEFAULT_MODEL_FILENAME}",
+    "GLOSSARY_PATH": "glossary/glossary.json",
+    "SOURCE_PATH": "source",
+    "OUTPUT_ROOT": "translated",
+    "SERVER_URL": "http://127.0.0.1:8080",
+    "MAX_CHARS": "1400",
+    "TIMEOUT": "180",
+    "DRAFT_TEMPERATURE": "0.2",
+    "REFINE_TEMPERATURE": "0.7",
+    "REFINE_ENABLED": "on",
+    "TOP_P": "0.9",
+    "N_PREDICT": "1800",
+    "CTX_SIZE": "8192",
+    "STARTUP_TIMEOUT": "180",
+}
+DEFAULT_ENV_CONTENT = "\n".join(f"{key}={value}" for key, value in DEFAULT_ENV_VALUES.items()) + "\n"
+DEFAULT_GLOSSARY_CONTENT = """{
+ "ウマ娘": "우마무스메"
+}
+"""
+
+
+@dataclass(frozen=True)
+class RuntimeSettings:
+    llama_server_path: Path
+    llama_model_path: Path
+    glossary_path: Path
+    source_path: Path
+    server_url: str
+    output_root: Path
+    max_chars: int
+    timeout: int
+    draft_temperature: float
+    refine_temperature: float
+    refine_enabled: bool
+    top_p: float
+    n_predict: int
+    ctx_size: int
+    startup_timeout: int
+
+
+def _warn_invalid_env(name: str, value: str, default: object) -> None:
+    print(f"[WARNING] .env value is invalid, using default: {name}={value!r} -> {default!r}")
+
+
+def load_dotenv() -> None:
+    env_path = APP_ROOT / ".env"
+    if not env_path.exists():
+        return
+
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+        os.environ[key.strip()] = value.strip().strip('"').strip("'")
+
+
+def _get_str(name: str, default: str) -> str:
+    return os.getenv(name, default)
+
+
+def _get_path(name: str, default: str) -> Path:
+    raw_value = _get_str(name, default)
+    path = Path(raw_value)
+    if path.is_absolute():
+        return path
+    return APP_ROOT / path
+
+
+def _get_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+
+    try:
+        return int(value)
+    except ValueError:
+        _warn_invalid_env(name, value, default)
+        return default
+
+
+def _get_float(name: str, default: float) -> float:
+    value = os.getenv(name)
+    if value is None:
+        return default
+
+    try:
+        return float(value)
+    except ValueError:
+        _warn_invalid_env(name, value, default)
+        return default
+
+
+def _get_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+
+    _warn_invalid_env(name, value, default)
+    return default
+
+
+def _get_json_list(name: str, default: list[str]) -> list[str]:
+    value = os.getenv(name)
+    if value is None:
+        return default.copy()
+
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        _warn_invalid_env(name, value, default)
+        return default.copy()
+
+    if not isinstance(parsed, list) or not all(isinstance(item, str) for item in parsed):
+        _warn_invalid_env(name, value, default)
+        return default.copy()
+    return parsed
+
+
+def read_env_file(env_path: Path | None = None) -> dict[str, str]:
+    resolved_env_path = env_path or (APP_ROOT / ".env")
+    if not resolved_env_path.exists():
+        return {}
+
+    values: dict[str, str] = {}
+    for raw_line in resolved_env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key.strip()] = value.strip().strip('"').strip("'")
+    return values
+
+
+def update_env_value(key: str, value: str, env_path: Path | None = None) -> None:
+    resolved_env_path = env_path or (APP_ROOT / ".env")
+    lines = resolved_env_path.read_text(encoding="utf-8").splitlines() if resolved_env_path.exists() else []
+    updated_lines: list[str] = []
+    replaced = False
+
+    for raw_line in lines:
+        stripped = raw_line.strip()
+        if stripped and not stripped.startswith("#") and "=" in raw_line:
+            existing_key, _ = raw_line.split("=", 1)
+            if existing_key.strip() == key:
+                updated_lines.append(f"{key}={value}")
+                replaced = True
+                continue
+        updated_lines.append(raw_line)
+
+    if not replaced:
+        updated_lines.append(f"{key}={value}")
+
+    resolved_env_path.write_text("\n".join(updated_lines).rstrip() + "\n", encoding="utf-8")
+
+
+def get_env_settings_items() -> list[tuple[str, str]]:
+    env_values = read_env_file()
+    return [(key, env_values.get(key, DEFAULT_ENV_VALUES.get(key, ""))) for key in EDITABLE_ENV_KEYS]
+
+
+def update_env_setting(key: str, value: str) -> None:
+    if key not in EDITABLE_ENV_KEYS:
+        raise ValueError(f"Unsupported env key: {key}")
+    update_env_value(key, value.strip())
+
+
+def get_configured_model_path(env_path: Path | None = None) -> Path:
+    env_values = read_env_file(env_path)
+    raw_model_path = env_values.get("LLAMA_MODEL_PATH", DEFAULT_ENV_VALUES["LLAMA_MODEL_PATH"])
+    model_path = Path(raw_model_path)
+    if model_path.is_absolute():
+        return model_path
+    return APP_ROOT / model_path
+
+
+def get_translation_block_reason() -> str | None:
+    model_path = get_configured_model_path()
+    if not model_path.is_file():
+        return f"[ERROR] GGUF 모델이 없습니다: {model_path}"
+    return None
+
+
+def get_runtime_settings() -> RuntimeSettings:
+    load_dotenv()
+    return RuntimeSettings(
+        llama_server_path=_get_path("LLAMA_SERVER_PATH", DEFAULT_ENV_VALUES["LLAMA_SERVER_PATH"]),
+        llama_model_path=_get_path("LLAMA_MODEL_PATH", DEFAULT_ENV_VALUES["LLAMA_MODEL_PATH"]),
+        glossary_path=_get_path("GLOSSARY_PATH", DEFAULT_ENV_VALUES["GLOSSARY_PATH"]),
+        source_path=_get_path("SOURCE_PATH", DEFAULT_ENV_VALUES["SOURCE_PATH"]),
+        server_url=_get_str("SERVER_URL", DEFAULT_ENV_VALUES["SERVER_URL"]),
+        output_root=_get_path("OUTPUT_ROOT", DEFAULT_ENV_VALUES["OUTPUT_ROOT"]),
+        max_chars=_get_int("MAX_CHARS", int(DEFAULT_ENV_VALUES["MAX_CHARS"])),
+        timeout=_get_int("TIMEOUT", int(DEFAULT_ENV_VALUES["TIMEOUT"])),
+        draft_temperature=_get_float("DRAFT_TEMPERATURE", float(DEFAULT_ENV_VALUES["DRAFT_TEMPERATURE"])),
+        refine_temperature=_get_float("REFINE_TEMPERATURE", float(DEFAULT_ENV_VALUES["REFINE_TEMPERATURE"])),
+        refine_enabled=_get_bool("REFINE_ENABLED", DEFAULT_ENV_VALUES["REFINE_ENABLED"] == "on"),
+        top_p=_get_float("TOP_P", float(DEFAULT_ENV_VALUES["TOP_P"])),
+        n_predict=_get_int("N_PREDICT", int(DEFAULT_ENV_VALUES["N_PREDICT"])),
+        ctx_size=_get_int("CTX_SIZE", int(DEFAULT_ENV_VALUES["CTX_SIZE"])),
+        startup_timeout=_get_int("STARTUP_TIMEOUT", int(DEFAULT_ENV_VALUES["STARTUP_TIMEOUT"])),
+    )
+
+
+load_dotenv()

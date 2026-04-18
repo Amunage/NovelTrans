@@ -25,6 +25,7 @@ class TranslationConfig:
     timeout: int
     draft_temperature: float
     refine_temperature: float
+    refine_enabled: bool
     top_p: float
     n_predict: int
     context_size: int

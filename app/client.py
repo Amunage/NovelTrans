@@ -9,43 +9,20 @@ import time
 from pathlib import Path
 from urllib import error, request
 
+from app.config import get_runtime_settings
+from app.controller import prompt_for_missing_paths, prompt_for_source_files_with_ui
 from app.refiner import refine_document
-from app.settings import (
-    DEFAULT_CTX_SIZE,
-    DEFAULT_DRAFT_TEMPERATURE,
-    DEFAULT_MAX_CHARS,
-    DEFAULT_N_PREDICT,
-    DEFAULT_OUTPUT_ROOT,
-    DEFAULT_REFINE_TEMPERATURE,
-    DEFAULT_SERVER_URL,
-    DEFAULT_STARTUP_TIMEOUT,
-    DEFAULT_TIMEOUT,
-    DEFAULT_TOP_P,
-    GLOSSARY_PATH,
-    LLAMA_MODEL_PATH,
-    LLAMA_SERVER_PATH,
-    SOURCE_PATH,
-)
 from app.translation import (
     TranslationConfig,
+    atomic_write_text,
     build_draft_output_path,
     build_output_path,
+    build_translated_document,
     translate_document,
     validate_paths,
 )
-from app.ui import (
-    parse_command,
-    render_translation_complete_screen,
-    render_translation_progress_screen,
-    render_translation_selection_screen,
-)
-from app.utils import (
-    find_chapter_files,
-    find_source_novels,
-    parse_chapter_selection,
-    parse_source_file,
-    sanitize_model_text,
-)
+from app.ui import render_translation_complete_screen, render_translation_progress_screen
+from app.utils import parse_source_file, sanitize_model_text, split_into_chunks
 
 
 class LlamaCppServerClient:
@@ -55,9 +32,13 @@ class LlamaCppServerClient:
         self.health_url = self.base_url + "/health"
         self.timeout = max(1, timeout)
 
-    def wait_until_ready(self, startup_timeout: int) -> None:
-        deadline = time.time() + startup_timeout
+    def wait_until_ready(self, startup_timeout: int, progress_callback=None) -> None:
+        start_time = time.time()
+        deadline = start_time + startup_timeout
         while time.time() < deadline:
+            elapsed_seconds = int(time.time() - start_time)
+            if progress_callback is not None:
+                progress_callback(elapsed_seconds, startup_timeout)
             try:
                 req = request.Request(self.health_url, method="GET")
                 with request.urlopen(req, timeout=5) as response:
@@ -198,37 +179,45 @@ def extract_port(server_url: str) -> int:
 
 
 def parse_args() -> TranslationConfig:
+    runtime_settings = get_runtime_settings()
     parser = argparse.ArgumentParser(description="Translate one crawler chapter file with llama.cpp.")
     parser.add_argument("--source", help="Source txt file to translate")
     parser.add_argument("--server-exe", help="Path to llama-server executable")
     parser.add_argument("--model", help="Path to GGUF model file")
-    parser.add_argument("--server-url", default=DEFAULT_SERVER_URL, help="llama-server base URL")
+    parser.add_argument("--server-url", default=runtime_settings.server_url, help="llama-server base URL")
     parser.add_argument("--glossary", help="Optional glossary JSON path")
-    parser.add_argument("--output-root", default=str(DEFAULT_OUTPUT_ROOT), help="Root directory for translated output")
-    parser.add_argument("--max-chars", type=int, default=DEFAULT_MAX_CHARS, help="Maximum characters per chunk")
-    parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, help="Request timeout in seconds")
-    parser.add_argument("--draft-temperature", type=float, default=DEFAULT_DRAFT_TEMPERATURE)
-    parser.add_argument("--refine-temperature", type=float, default=DEFAULT_REFINE_TEMPERATURE)
-    parser.add_argument("--top-p", type=float, default=DEFAULT_TOP_P)
-    parser.add_argument("--n-predict", type=int, default=DEFAULT_N_PREDICT)
-    parser.add_argument("--ctx-size", type=int, default=DEFAULT_CTX_SIZE)
+    parser.add_argument("--output-root", default=str(runtime_settings.output_root), help="Root directory for translated output")
+    parser.add_argument("--max-chars", type=int, default=runtime_settings.max_chars, help="Maximum characters per chunk")
+    parser.add_argument("--timeout", type=int, default=runtime_settings.timeout, help="Request timeout in seconds")
+    parser.add_argument("--draft-temperature", type=float, default=runtime_settings.draft_temperature)
+    parser.add_argument("--refine-temperature", type=float, default=runtime_settings.refine_temperature)
+    parser.add_argument(
+        "--refine-enabled",
+        default="on" if runtime_settings.refine_enabled else "off",
+        choices=("on", "off"),
+        help="Enable or disable the refinement pass",
+    )
+    parser.add_argument("--top-p", type=float, default=runtime_settings.top_p)
+    parser.add_argument("--n-predict", type=int, default=runtime_settings.n_predict)
+    parser.add_argument("--ctx-size", type=int, default=runtime_settings.ctx_size)
     parser.add_argument("--gpu-layers", type=int)
     parser.add_argument("--threads", type=int)
     parser.add_argument("--sleep", type=float, default=0.0)
-    parser.add_argument("--startup-timeout", type=int, default=DEFAULT_STARTUP_TIMEOUT)
+    parser.add_argument("--startup-timeout", type=int, default=runtime_settings.startup_timeout)
     args = parser.parse_args()
 
     return TranslationConfig(
         source_file=Path(args.source) if args.source else None,
-        server_executable=Path(args.server_exe) if args.server_exe else LLAMA_SERVER_PATH,
-        model_path=Path(args.model) if args.model else LLAMA_MODEL_PATH,
+        server_executable=Path(args.server_exe) if args.server_exe else runtime_settings.llama_server_path,
+        model_path=Path(args.model) if args.model else runtime_settings.llama_model_path,
         server_url=args.server_url,
-        glossary_path=Path(args.glossary) if args.glossary else GLOSSARY_PATH,
+        glossary_path=Path(args.glossary) if args.glossary else runtime_settings.glossary_path,
         output_root=Path(args.output_root),
         max_chunk_chars=max(300, args.max_chars),
         timeout=max(1, args.timeout),
         draft_temperature=args.draft_temperature,
         refine_temperature=args.refine_temperature,
+        refine_enabled=args.refine_enabled == "on",
         top_p=args.top_p,
         n_predict=max(128, args.n_predict),
         context_size=max(1024, args.ctx_size),
@@ -239,108 +228,16 @@ def parse_args() -> TranslationConfig:
     )
 
 
-def prompt_for_missing_paths(config: TranslationConfig) -> TranslationConfig:
-    if config.server_executable is None:
-        raw = input("llama-server 실행 파일 경로: ").strip().strip('"')
-        config.server_executable = Path(raw) if raw else None
-
-    if config.model_path is None:
-        raw = input("GGUF 모델 파일 경로: ").strip().strip('"')
-        config.model_path = Path(raw) if raw else None
-
-    if config.glossary_path is None:
-        raw = input(f"glossary.json 경로 (기본: {GLOSSARY_PATH}): ").strip().strip('"')
-        config.glossary_path = Path(raw) if raw else GLOSSARY_PATH
-
-    return config
-
-
-def prompt_for_source_files_with_ui(source_root: Path) -> list[Path]:
-    novel_dirs = find_source_novels(source_root)
-    if not novel_dirs:
-        raise ValueError(f"No source novel folders found: {source_root}")
-
-    step = "novel"
-    status_message = None
-    selected_novel: Path | None = None
-
-    while True:
-        if step == "novel":
-            render_translation_selection_screen(
-                step="novel",
-                source_root=source_root,
-                novel_dirs=novel_dirs,
-                status_message=status_message,
-            )
-            raw = input("").strip()
-            command = parse_command(raw)
-
-            if command in {"main", "back", "exit"}:
-                return []
-
-            try:
-                selected_index = int(raw)
-            except ValueError:
-                status_message = "[ERROR] 소설 번호를 숫자로 입력해 주세요."
-                continue
-
-            if not 1 <= selected_index <= len(novel_dirs):
-                status_message = "[ERROR] 목록에 있는 소설 번호를 입력해 주세요."
-                continue
-
-            selected_novel = novel_dirs[selected_index - 1]
-            step = "chapter"
-            status_message = None
-            continue
-
-        assert selected_novel is not None
-        chapter_files = find_chapter_files(selected_novel)
-        if not chapter_files:
-            raise ValueError(f"No chapter files found in: {selected_novel}")
-
-        render_translation_selection_screen(
-            step="chapter",
-            source_root=source_root,
-            novel_dirs=novel_dirs,
-            selected_novel=selected_novel,
-            chapter_files=chapter_files,
-            status_message=status_message,
-        )
-        raw = input("").strip()
-        command = parse_command(raw)
-
-        if command == "main":
-            return []
-        if command == "back":
-            step = "novel"
-            status_message = None
-            continue
-        if command == "exit":
-            return []
-
-        selection = parse_chapter_selection(raw)
-        if selection is None:
-            status_message = "[ERROR] 3 또는 1~5 형식으로 입력해 주세요."
-            continue
-
-        start_number, end_number = selection
-        chapter_files_by_number = {int(path.stem): path for path in chapter_files}
-        missing_numbers = [number for number in range(start_number, end_number + 1) if number not in chapter_files_by_number]
-        if missing_numbers:
-            missing_names = ", ".join(f"{number:04d}.txt" for number in missing_numbers)
-            status_message = f"[ERROR] 없는 파일이 있습니다: {missing_names}"
-            continue
-
-        return [chapter_files_by_number[number] for number in range(start_number, end_number + 1)]
-
-
 def main() -> int:
     server_process = None
 
     try:
         config = parse_args()
+        runtime_settings = get_runtime_settings()
         selected_source_files = (
-            [config.source_file] if config.source_file is not None else prompt_for_source_files_with_ui(SOURCE_PATH)
+            [config.source_file]
+            if config.source_file is not None
+            else prompt_for_source_files_with_ui(runtime_settings.source_path)
         )
         config = prompt_for_missing_paths(config)
         if not selected_source_files:
@@ -349,18 +246,31 @@ def main() -> int:
         render_translation_progress_screen(
             file_index=1,
             total_files=len(selected_source_files),
-            stage="서버 시작",
+            stage="모델 로드",
             current=0,
             total=1,
             source_file=selected_source_files[0],
-            title="llama-server 준비",
+            title="",
             output_path=config.output_root,
-            status_message="[INFO] llama-server 시작 중...",
+            status_message="[INFO] 모델 로드 중...",
         )
 
         server_process = start_llama_server(config)
         client = LlamaCppServerClient(config.server_url, config.timeout)
-        client.wait_until_ready(config.startup_timeout)
+        client.wait_until_ready(
+            config.startup_timeout,
+            progress_callback=lambda elapsed, timeout: render_translation_progress_screen(
+                file_index=1,
+                total_files=len(selected_source_files),
+                stage="모델 로드",
+                current=min(elapsed, timeout),
+                total=max(timeout, 1),
+                source_file=selected_source_files[0],
+                title="",
+                output_path=config.output_root,
+                status_message=f"[INFO] 모델 로드 중...",
+            ),
+        )
 
         last_output_path: Path | None = None
         for index, source_file in enumerate(selected_source_files, start=1):
@@ -368,6 +278,7 @@ def main() -> int:
             validate_paths(config)
 
             document = parse_source_file(source_file)
+            source_chunks = split_into_chunks(document.body, config.max_chunk_chars)
             draft_output_path = build_draft_output_path(source_file, config.output_root)
             output_path = build_output_path(source_file, config.output_root)
             last_output_path = output_path
@@ -393,21 +304,26 @@ def main() -> int:
                 progress_callback=progress_callback,
             )
 
-            refine_document(
-                translated_title,
-                translated_chunks,
-                client,
-                config,
-                output_path,
-                progress_callback=progress_callback,
-            )
+            if config.refine_enabled:
+                refine_document(
+                    translated_title,
+                    translated_chunks,
+                    source_chunks,
+                    client,
+                    config,
+                    output_path,
+                    progress_callback=progress_callback,
+                )
+            else:
+                progress_callback("다듬기 생략", 1, 1, "[INFO] 다듬기가 꺼져 있어 초벌 번역을 최종 결과로 저장합니다.")
+                atomic_write_text(output_path, build_translated_document(translated_title, translated_chunks))
 
         render_translation_complete_screen(
             total_files=len(selected_source_files),
             completed_files=len(selected_source_files),
             output_root=config.output_root,
             last_output_path=last_output_path,
-            status_message="[INFO] 모든 번역 파일 저장이 완료되었습니다.",
+            status_message="[INFO] 모든 번역 파일 처리가 완료되었습니다.",
         )
         input("")
         return 0

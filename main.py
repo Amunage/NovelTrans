@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import os
 import sys
 
+from app.config import get_translation_block_reason
+from app.controller import run_settings_menu
 from app.setup import ensure_runtime_setup
 
 ensure_runtime_setup()
 
 from app.client import main as translation_main
 from app.crawler import main as crawler_main
-from app.ui import render_main_menu
+from app.ui import prompt_main_menu
 
 
 def main() -> int:
@@ -16,8 +19,7 @@ def main() -> int:
         status_message = None
 
         while True:
-            render_main_menu(status_message)
-            choice = input("").strip()
+            choice = prompt_main_menu(status_message)
 
             if choice == "1":
                 result = crawler_main()
@@ -27,17 +29,27 @@ def main() -> int:
                 continue
 
             if choice == "2":
+                block_reason = get_translation_block_reason()
+                if block_reason is not None:
+                    status_message = block_reason
+                    continue
+
                 result = translation_main()
                 status_message = None
                 if result == 130:
                     return 130
                 continue
 
-            if choice == "3":
+            if choice == "9":
+                status_message = run_settings_menu()
+                continue
+
+            if choice == "0":
                 return 0
 
             status_message = "[ERROR] 잘못된 입력입니다."
     except KeyboardInterrupt:
+        os.system("cls")
         print("\n[INFO] 사용자가 작업을 중단했습니다.")
         return 130
 

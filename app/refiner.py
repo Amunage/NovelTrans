@@ -20,6 +20,7 @@ INSTRUCTIONS = REFINER_INSTRUCTIONS
 
 def build_refine_prompts(
     current_text: str,
+    previous_source: str | None,
     glossary: dict[str, str],
     *,
     is_title: bool,
@@ -39,6 +40,10 @@ def build_refine_prompts(
         for _, target in glossary.items():
             prompt_lines.append(target)
         prompt_lines.append("</glossary>")
+    
+    if not is_title and previous_source:
+        prompt_lines.append("If <previous_source> is provided, treat it as context only.")
+        prompt_lines.extend(["<previous_source>", previous_source, "</previous_source>"])
 
     prompt_lines.append(f"Rewrite only the text inside <{tag_name}>.")
     prompt_lines.extend([f"<{tag_name}>", current_text, f"</{tag_name}>"])
@@ -47,13 +52,14 @@ def build_refine_prompts(
 
 def _refine_once(
     current_text: str,
+    previous_source: str | None,
     glossary: dict[str, str],
     client: TranslatorClient,
     config: TranslationConfig,
     *,
     is_title: bool,
 ) -> str:
-    prompt = build_refine_prompts(current_text, glossary, is_title=is_title)
+    prompt = build_refine_prompts(current_text, previous_source, glossary, is_title=is_title)
     base_temperature = config.refine_temperature
     temperature = min(max(base_temperature, 0.35), 0.8)
     top_p = max(config.top_p, 0.95)
@@ -69,6 +75,7 @@ def _refine_once(
 def refine_document(
     translated_title: str,
     translated_chunks: list[str],
+    source_chunks: list[str],
     client: TranslatorClient,
     config: TranslationConfig,
     output_path: Path,
@@ -76,6 +83,9 @@ def refine_document(
     progress_label: str | None = None,
     progress_callback: Callable[[str, int, int, str | None], None] | None = None,
 ) -> tuple[str, list[str]]:
+    if len(source_chunks) != len(translated_chunks):
+        raise ValueError("Source chunk count does not match translated chunk count for refinement")
+
     glossary = load_glossary(config.glossary_path)
     total_items = len(translated_chunks) + 1
 
@@ -89,6 +99,7 @@ def refine_document(
     )
     refined_title = _refine_once(
         translated_title,
+        None,
         glossary,
         is_title=True,
         client=client,
@@ -108,8 +119,11 @@ def refine_document(
             total=total_items,
             progress_label=progress_label,
         )
+        source_index = index - 2
+        previous_source = source_chunks[source_index - 1] if source_index >= 1 else None
         refined_chunk = _refine_once(
             chunk,
+            previous_source,
             glossary,
             is_title=False,
             client=client,

@@ -9,7 +9,7 @@ from urllib.parse import urljoin
 import cloudscraper
 from bs4 import BeautifulSoup
 
-from app.settings import SOURCE_PATH
+from app.config import get_runtime_settings
 from app.ui import (
     clear_screen,
     parse_command,
@@ -20,7 +20,7 @@ from app.ui import (
 )
 
 
-OUTPUT_PATH = SOURCE_PATH
+OUTPUT_PATH = get_runtime_settings().source_path
 Chapter = tuple[int, str, str]
 
 
