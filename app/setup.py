@@ -285,6 +285,24 @@ def fetch_remote_file_size(download_url: str) -> int | None:
         return _get_content_length(response)
 
 
+def _get_content_length(response) -> int | None:
+    header_value = None
+
+    if hasattr(response, "headers") and response.headers is not None:
+        header_value = response.headers.get("Content-Length")
+
+    if not header_value and hasattr(response, "getheader"):
+        header_value = response.getheader("Content-Length")
+
+    if not header_value:
+        return None
+
+    try:
+        return int(header_value)
+    except (TypeError, ValueError):
+        return None
+
+
 def choose_recommended_model_index(
     system_specs: dict[str, object],
     model_options: list[dict[str, object]],

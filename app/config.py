@@ -103,7 +103,14 @@ DEFAULT_PROMPT_SETTINGS = {
 DEFAULT_PROMPT_CONTENT = json.dumps(DEFAULT_PROMPT_SETTINGS, ensure_ascii=False, indent=2) + "\n"
 
 
+def _ensure_prompt_settings_file() -> None:
+    PROMPT_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    if not PROMPT_SETTINGS_PATH.exists():
+        PROMPT_SETTINGS_PATH.write_text(DEFAULT_PROMPT_CONTENT, encoding="utf-8")
+
+
 def _load_prompt_settings() -> tuple[str, list[str], list[str]]:
+    _ensure_prompt_settings_file()
     data = json.loads(PROMPT_SETTINGS_PATH.read_text(encoding="utf-8"))
 
     separator_line = data.get("separator_line")
