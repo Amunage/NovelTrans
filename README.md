@@ -83,6 +83,8 @@ translated/
 - `LLAMA_MODEL_PATH`: 사용할 GGUF 모델 경로
 - `CTX_SIZE`: 컨텍스트 크기
 - `N_PREDICT`: 최대 출력 토큰 수
+- `GPU_LAYERS`: GPU에 올릴 레이어 수
+- `THREADS`: CPU 스레드 수
 
 ## 개발용 빌드
 

@@ -37,7 +37,7 @@ def parse_chapter_selection(raw: str) -> tuple[int, int] | None:
         chapter_number = int(value)
         return chapter_number, chapter_number
 
-    range_match = re.fullmatch(r"(\d+)\s*~\s*(\d+)", value)
+    range_match = re.fullmatch(r"(\d+)\s*[~-]\s*(\d+)", value)
     if not range_match:
         return None
 

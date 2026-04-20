@@ -25,6 +25,8 @@ SETTING_DESCRIPTIONS = {
     "TOP_P": "0.0 ~ 1.0 | 낮을수록 좁게 선택, 높을수록 다양하게 선택",
     "N_PREDICT": "정수 | 최대 출력 토큰 수",
     "CTX_SIZE": "정수 | 모델 컨텍스트 크기",
+    "GPU_LAYERS": "정수 또는 빈 값 | GPU에 올릴 레이어 수, 비우면 기본값 사용",
+    "THREADS": "정수 또는 빈 값 | CPU 스레드 수, 비우면 기본값 사용",
     "STARTUP_TIMEOUT": "양의 정수(초) | 서버 시작 대기 시간",
 }
 
@@ -158,7 +160,7 @@ def render_crawler_screen(
         print("(예: https://syosetu.org/novel/267236/)")
     elif step == "range" and chapters:
         print(f"발견 챕터: {len(chapters)}개 ({chapters[0][0]}~{chapters[-1][0]})")
-        print("추출 범위를 입력해 주세요. (예: 3~15, 미입력 시 전체)")
+        print("추출 범위를 입력해 주세요. (예: 3~15 또는 3-15, 미입력 시 전체)")
     elif step == "delay" and chapters:
         print(f"대상 챕터: {len(chapters)}개 ({chapters[0][0]}~{chapters[-1][0]})")
         print("요청 간격을 입력해 주세요. (미입력 시 기본=1.0, 빠름=0.5, 안전=2.0)")
@@ -246,6 +248,7 @@ def render_translation_selection_screen(
     novel_dirs: Sequence[Path],
     selected_novel: Path | None = None,
     chapter_files: Sequence[Path] | None = None,
+    last_translated_label: str | None = None,
     status_message: str | None = None,
 ) -> None:
     clear_screen()
@@ -260,10 +263,11 @@ def render_translation_selection_screen(
         for index, novel_dir in enumerate(novel_dirs, start=1):
             print(f"[{index}] {novel_dir.name}")
     elif step == "chapter" and selected_novel is not None and chapter_files is not None:
-        print("번역할 챕터 번호 또는 범위를 입력해 주세요. (예: 3 또는 1~5)")
+        print("번역할 챕터 번호 또는 범위를 입력해 주세요. (예: 3 또는 1~5, 1-5)")
         print("-" * 60)
         print(f"선택한 소설: {selected_novel.name}")
         print(f"발견 챕터: {len(chapter_files)}개")
+        print(f"마지막 번역 지점: {last_translated_label or '없음'}")
 
     print("-" * 60)
     print(status_message or "")
@@ -313,6 +317,7 @@ def render_translation_complete_screen(
     completed_files: int,
     output_root: Path,
     last_output_path: Path | None = None,
+    elapsed_seconds: int = 0,
     status_message: str | None = None,
 ) -> None:
     clear_screen()
@@ -320,6 +325,7 @@ def render_translation_complete_screen(
     print("번역 완료. 엔터를 누르면 메인 메뉴로 돌아갑니다.")
     print("-" * 60)
     print(f"완료 파일: {completed_files}/{total_files}")
+    print(f"걸린 시간: {_format_elapsed_time(elapsed_seconds)}")
     print(f"출력 폴더: {output_root}")
     if last_output_path is not None:
         print(f"결과 파일: {last_output_path}")

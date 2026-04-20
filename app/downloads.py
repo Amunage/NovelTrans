@@ -18,6 +18,12 @@ class DownloadCancelledError(Exception):
         self.asset_name = asset_name
 
 
+def fetch_remote_file_size(download_url: str, request_headers: dict[str, str] | None = None) -> int | None:
+    request = urllib.request.Request(download_url, headers=request_headers or {}, method="HEAD")
+    with urllib.request.urlopen(request, timeout=30) as response:
+        return get_content_length(response)
+
+
 def download_file(
     download_url: str,
     destination: Path,
@@ -37,7 +43,7 @@ def download_file(
     try:
         os.system("cls")
         with urllib.request.urlopen(request, timeout=120) as response, temp_destination.open("wb") as output:
-            total_size = _get_content_length(response)
+            total_size = get_content_length(response)
             downloaded = 0
             next_report_percent = 0
             last_unknown_report_at = 0.0
@@ -89,7 +95,7 @@ def download_file(
         raise
 
 
-def _get_content_length(response: object) -> int | None:
+def get_content_length(response: object) -> int | None:
     headers = getattr(response, "headers", None)
     if headers is None:
         return None
@@ -102,6 +108,10 @@ def _get_content_length(response: object) -> int | None:
         return int(content_length)
     except ValueError:
         return None
+
+
+def _get_content_length(response: object) -> int | None:
+    return get_content_length(response)
 
 
 def _report_download_progress(

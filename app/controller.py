@@ -4,7 +4,7 @@ from pathlib import Path
 
 from app.config import get_env_settings_items, get_runtime_settings, log_runtime_event, update_env_setting
 from app.setup import run_model_download_setup
-from app.translation import TranslationConfig
+from app.translation import TranslationConfig, build_output_path
 from app.ui import (
     parse_command,
     prompt_env_setting_value,
@@ -17,6 +17,7 @@ from app.utils import find_chapter_files, find_source_novels, parse_chapter_sele
 
 
 POSITIVE_INT_KEYS = {"MAX_CHARS", "TIMEOUT", "N_PREDICT", "CTX_SIZE", "STARTUP_TIMEOUT"}
+OPTIONAL_POSITIVE_INT_KEYS = {"GPU_LAYERS", "THREADS"}
 UNIT_FLOAT_KEYS = {"TOP_P"}
 
 
@@ -25,16 +26,16 @@ def validate_env_setting_value(key: str, new_value: str) -> str | None:
         try:
             numeric_value = float(new_value)
         except ValueError:
-            return f"[ERROR] {key} 값은 숫자로 입력해 주세요."
+            return f"[ERROR] {key} 값을 숫자로 입력해 주세요."
 
         if not 0.0 <= numeric_value <= 1.0:
             return f"[ERROR] {key} 값은 0.0 ~ 1.0 범위여야 합니다."
 
-    if key in POSITIVE_INT_KEYS:
+    if key in POSITIVE_INT_KEYS or key in OPTIONAL_POSITIVE_INT_KEYS:
         try:
             int_value = int(new_value)
         except ValueError:
-            return f"[ERROR] {key} 값은 정수로 입력해 주세요."
+            return f"[ERROR] {key} 값을 정수로 입력해 주세요."
 
         if int_value <= 0:
             return f"[ERROR] {key} 값은 1 이상이어야 합니다."
@@ -156,11 +157,27 @@ def prompt_for_missing_paths(config: TranslationConfig) -> TranslationConfig:
     return config
 
 
+def _find_last_translated_label(chapter_files: list[Path], output_root: Path) -> str | None:
+    last_match: tuple[int, Path] | None = None
+
+    for index, chapter_file in enumerate(chapter_files, start=1):
+        output_path = build_output_path(chapter_file, output_root)
+        if output_path.is_file():
+            last_match = (index, chapter_file)
+
+    if last_match is None:
+        return None
+
+    chapter_index, chapter_file = last_match
+    return f"[{chapter_index}] {chapter_file.name}"
+
+
 def prompt_for_source_files_with_ui(source_root: Path) -> list[Path]:
     novel_dirs = find_source_novels(source_root)
     if not novel_dirs:
         raise ValueError(f"No source novel folders found: {source_root}")
 
+    runtime_settings = get_runtime_settings()
     step = "novel"
     status_message = None
     selected_novel: Path | None = None
@@ -199,6 +216,7 @@ def prompt_for_source_files_with_ui(source_root: Path) -> list[Path]:
             novel_dirs=novel_dirs,
             selected_novel=selected_novel,
             chapter_files=chapter_files,
+            last_translated_label=_find_last_translated_label(chapter_files, runtime_settings.output_root),
             status_message=status_message,
         )
         raw = input("").strip()
@@ -213,7 +231,7 @@ def prompt_for_source_files_with_ui(source_root: Path) -> list[Path]:
 
         selection = parse_chapter_selection(raw)
         if selection is None:
-            status_message = "[ERROR] 3 또는 1~5 형식으로 입력해 주세요."
+            status_message = "[ERROR] 3 또는 1~5, 1-5 형식으로 입력해 주세요."
             continue
 
         start_index, end_index = selection

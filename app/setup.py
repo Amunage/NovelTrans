@@ -5,13 +5,8 @@ import os
 import platform
 import re
 import shutil
-import subprocess
 import sys
-import tempfile
-import urllib.parse
-import urllib.request
 from pathlib import Path
-from zipfile import ZipFile
 
 from app.config import (
     APP_ROOT,
@@ -24,64 +19,20 @@ from app.config import (
     log_runtime_event,
     update_env_value,
 )
-from app.downloads import DownloadCancelledError, download_file
+from app.downloads import DownloadCancelledError, download_file, fetch_remote_file_size
+from app.setmodel import (
+    HUGGING_FACE_HEADERS,
+    MODEL_CANDIDATES,
+    build_huggingface_download_url,
+    detect_cuda_version,
+    fetch_huggingface_filenames,
+    install_llama_cpp_assets,
+    resolve_llama_cpp_assets,
+    run_command,
+    write_runtime_metadata,
+)
 from app.ui import prompt_for_model_download, render_download_progress_screen
-
-
-GITHUB_RELEASES_API_URL = "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=5"
-GITHUB_API_HEADERS = {
-    "Accept": "application/vnd.github+json",
-    "User-Agent": "noveltrans-runtime-setup",
-}
-CUDA_13_WINDOWS_BINARY_PATTERN = re.compile(r"^llama-.*-bin-win-cuda-13\.1-x64\.zip$")
-CUDA_13_WINDOWS_ASSET = "cudart-llama-bin-win-cuda-13.1-x64.zip"
-CUDA_12_WINDOWS_BINARY_PATTERN = re.compile(r"^llama-.*-bin-win-cuda-12\.4-x64\.zip$")
-CUDA_12_WINDOWS_ASSET = "cudart-llama-bin-win-cuda-12.4-x64.zip"
-CPU_WINDOWS_ASSET_PATTERN = re.compile(r"^llama-.*-bin-win-cpu-x64\.zip$")
-LLAMA_RUNTIME_METADATA = ".noveltrans-runtime.json"
-HUGGING_FACE_MODEL_REPO = "unsloth/gemma-4-26B-A4B-it-GGUF"
-HUGGING_FACE_API_URL = f"https://huggingface.co/api/models/{HUGGING_FACE_MODEL_REPO}?expand[]=siblings"
-HUGGING_FACE_HEADERS = {
-    "User-Agent": "noveltrans-runtime-setup",
-}
 MODEL_SETUP_METADATA = ".noveltrans-model.json"
-MODEL_CANDIDATES = [
-    {
-        "filename": "gemma-4-26B-A4B-it-Q8_0.gguf",
-        "label": "Q8_0",
-        "summary": "최고 품질, 다만 매우 무겁습니다.",
-        "min_vram_gb": 28.0,
-        "min_ram_gb": 64.0,
-    },
-    {
-        "filename": "gemma-4-26B-A4B-it-UD-Q5_K_M.gguf",
-        "label": "Q5_K_M",
-        "summary": "고품질 우선, 24GB 이상 GPU에 적합합니다.",
-        "min_vram_gb": 24.0,
-        "min_ram_gb": 48.0,
-    },
-    {
-        "filename": "gemma-4-26B-A4B-it-UD-Q4_K_M.gguf",
-        "label": "Q4_K_M",
-        "summary": "균형형이며 16GB VRAM 환경에서는 다소 빡빡할 수 있습니다.",
-        "min_vram_gb": 18.0,
-        "min_ram_gb": 32.0,
-    },
-    {
-        "filename": "gemma-4-26B-A4B-it-UD-IQ4_XS.gguf",
-        "label": "IQ4_XS",
-        "summary": "16GB 전후 GPU에서 가장 무난한 권장값입니다.",
-        "min_vram_gb": 14.0,
-        "min_ram_gb": 24.0,
-    },
-    {
-        "filename": "gemma-4-26B-A4B-it-UD-Q2_K_XL.gguf",
-        "label": "Q2_K_XL",
-        "summary": "메모리가 부족할 때를 위한 최소 옵션입니다.",
-        "min_vram_gb": 10.0,
-        "min_ram_gb": 16.0,
-    },
-]
 
 
 def ensure_runtime_setup() -> None:
@@ -138,9 +89,9 @@ def ensure_llama_cpp_runtime(app_root: Path) -> None:
         return
 
     try:
-        cuda_version = detect_cuda_version()
+        cuda_version = detect_cuda_version(run_command)
         release, assets = resolve_llama_cpp_assets(cuda_version)
-        install_llama_cpp_assets(assets, runtime_dir)
+        install_llama_cpp_assets(assets, runtime_dir, render_progress=_render_llama_runtime_download_progress)
         write_runtime_metadata(runtime_dir, release["tag_name"], assets, cuda_version)
         installed_assets = ", ".join(str(asset["name"]) for asset in assets)
         print(f"[INFO] llama.cpp runtime installed: {installed_assets} -> {runtime_dir}")
@@ -215,7 +166,7 @@ def detect_system_ram_gb() -> float:
         "-Command",
         "[math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB, 2)",
     ]
-    output = _run_command(command)
+    output = run_command(command)
     if output is None:
         return 0.0
 
@@ -224,7 +175,7 @@ def detect_system_ram_gb() -> float:
 
 
 def detect_gpu_specs() -> tuple[str | None, float | None]:
-    output = _run_command(["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"])
+    output = run_command(["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"])
     if output:
         first_line = output.splitlines()[0]
         parts = [part.strip() for part in first_line.split(",")]
@@ -240,67 +191,21 @@ def detect_gpu_specs() -> tuple[str | None, float | None]:
 
 
 def fetch_model_options() -> list[dict[str, object]]:
-    available_filenames = fetch_huggingface_filenames()
+    available_filenames_by_repo = fetch_huggingface_filenames()
     options: list[dict[str, object]] = []
 
     for candidate in MODEL_CANDIDATES:
+        repo = str(candidate["repo"])
         filename = str(candidate["filename"])
-        if filename not in available_filenames:
+        if filename not in available_filenames_by_repo.get(repo, set()):
             continue
 
         option = dict(candidate)
-        option["download_url"] = build_huggingface_download_url(filename)
-        option["size_bytes"] = fetch_remote_file_size(str(option["download_url"]))
+        option["download_url"] = build_huggingface_download_url(repo, filename)
+        option["size_bytes"] = fetch_remote_file_size(str(option["download_url"]), request_headers=HUGGING_FACE_HEADERS)
         options.append(option)
 
     return options
-
-
-def fetch_huggingface_filenames() -> set[str]:
-    request = urllib.request.Request(HUGGING_FACE_API_URL, headers=HUGGING_FACE_HEADERS)
-    with urllib.request.urlopen(request, timeout=30) as response:
-        payload = json.load(response)
-
-    siblings = payload.get("siblings", [])
-    if not isinstance(siblings, list):
-        return set()
-
-    filenames: set[str] = set()
-    for sibling in siblings:
-        if isinstance(sibling, dict):
-            rfilename = sibling.get("rfilename")
-            if isinstance(rfilename, str):
-                filenames.add(rfilename)
-    return filenames
-
-
-def build_huggingface_download_url(filename: str) -> str:
-    encoded_filename = urllib.parse.quote(filename, safe="/")
-    return f"https://huggingface.co/{HUGGING_FACE_MODEL_REPO}/resolve/main/{encoded_filename}"
-
-
-def fetch_remote_file_size(download_url: str) -> int | None:
-    request = urllib.request.Request(download_url, headers=HUGGING_FACE_HEADERS, method="HEAD")
-    with urllib.request.urlopen(request, timeout=30) as response:
-        return _get_content_length(response)
-
-
-def _get_content_length(response) -> int | None:
-    header_value = None
-
-    if hasattr(response, "headers") and response.headers is not None:
-        header_value = response.headers.get("Content-Length")
-
-    if not header_value and hasattr(response, "getheader"):
-        header_value = response.getheader("Content-Length")
-
-    if not header_value:
-        return None
-
-    try:
-        return int(header_value)
-    except (TypeError, ValueError):
-        return None
 
 
 def choose_recommended_model_index(
@@ -338,7 +243,7 @@ def install_selected_model_option(
     )
     if not model_destination.is_file():
         download_file(
-            build_huggingface_download_url(str(selected_option["filename"])),
+            build_huggingface_download_url(str(selected_option["repo"]), str(selected_option["filename"])),
             model_destination,
             str(selected_option["filename"]),
             1,
@@ -373,7 +278,7 @@ def write_model_metadata(
     system_specs: dict[str, object],
 ) -> None:
     metadata = {
-        "repo": HUGGING_FACE_MODEL_REPO,
+        "repo": selected_option["repo"],
         "selected_model": selected_option["filename"],
         "selected_label": selected_option["label"],
         "size_bytes": selected_option.get("size_bytes"),
@@ -388,195 +293,6 @@ def to_relative_env_path(path: Path, app_root: Path) -> str:
         return path.relative_to(app_root).as_posix()
     except ValueError:
         return str(path)
-
-
-def detect_cuda_version() -> tuple[int, int] | None:
-    nvcc_output = _run_command(["nvcc", "--version"])
-    if nvcc_output:
-        match = re.search(r"release\s+(\d+)\.(\d+)", nvcc_output)
-        if match:
-            return int(match.group(1)), int(match.group(2))
-
-    nvidia_smi_output = _run_command(["nvidia-smi"])
-    if nvidia_smi_output:
-        match = re.search(r"CUDA Version:\s+(\d+)\.(\d+)", nvidia_smi_output)
-        if match:
-            return int(match.group(1)), int(match.group(2))
-
-    return None
-
-
-def resolve_llama_cpp_assets(
-    cuda_version: tuple[int, int] | None,
-) -> tuple[dict[str, object], list[dict[str, object]]]:
-    preferred_asset_groups = get_preferred_asset_groups(cuda_version)
-    releases = fetch_llama_cpp_releases()
-
-    for release in releases:
-        assets = find_matching_asset_group(release.get("assets", []), preferred_asset_groups)
-        if assets is not None:
-            return release, assets
-
-    preferred = ", ".join(" + ".join(group) for group in preferred_asset_groups)
-    raise RuntimeError(f"Could not find a matching llama.cpp asset set for: {preferred}")
-
-
-def get_preferred_asset_groups(cuda_version: tuple[int, int] | None) -> list[list[str]]:
-    if cuda_version is not None:
-        if cuda_version >= (13, 0):
-            return [
-                ["cuda13_binary", CUDA_13_WINDOWS_ASSET],
-                ["cuda12_binary", CUDA_12_WINDOWS_ASSET],
-                ["cpu"],
-            ]
-        if cuda_version >= (12, 0):
-            return [
-                ["cuda12_binary", CUDA_12_WINDOWS_ASSET],
-                ["cuda13_binary", CUDA_13_WINDOWS_ASSET],
-                ["cpu"],
-            ]
-    return [["cpu"]]
-
-
-def fetch_llama_cpp_releases() -> list[dict[str, object]]:
-    request = urllib.request.Request(GITHUB_RELEASES_API_URL, headers=GITHUB_API_HEADERS)
-    with urllib.request.urlopen(request, timeout=30) as response:
-        payload = json.load(response)
-
-    if not isinstance(payload, list) or not payload:
-        raise RuntimeError("GitHub releases API returned no releases")
-
-    return [item for item in payload if isinstance(item, dict)]
-
-
-def find_matching_asset_group(
-    assets: object,
-    preferred_asset_groups: list[list[str]],
-) -> list[dict[str, object]] | None:
-    if not isinstance(assets, list):
-        return None
-
-    normalized_assets = [asset for asset in assets if isinstance(asset, dict)]
-
-    for asset_group in preferred_asset_groups:
-        matched_assets: list[dict[str, object]] = []
-        for preferred in asset_group:
-            asset = find_asset_by_selector(normalized_assets, preferred)
-            if asset is None:
-                matched_assets = []
-                break
-            matched_assets.append(asset)
-        if matched_assets:
-            return matched_assets
-
-    return None
-
-
-def find_asset_by_selector(assets: list[dict[str, object]], selector: str) -> dict[str, object] | None:
-    for asset in assets:
-        asset_name = asset.get("name")
-        if not isinstance(asset_name, str):
-            continue
-
-        if selector == "cpu" and CPU_WINDOWS_ASSET_PATTERN.match(asset_name):
-            return asset
-        if selector == "cuda13_binary" and CUDA_13_WINDOWS_BINARY_PATTERN.match(asset_name):
-            return asset
-        if selector == "cuda12_binary" and CUDA_12_WINDOWS_BINARY_PATTERN.match(asset_name):
-            return asset
-        if asset_name == selector:
-            return asset
-
-    return None
-
-
-def install_llama_cpp_assets(assets: list[dict[str, object]], runtime_dir: Path) -> None:
-    runtime_dir.mkdir(parents=True, exist_ok=True)
-    log_runtime_event(f"install_llama_cpp_assets start | runtime_dir={runtime_dir} | assets={len(assets)}")
-
-    with tempfile.TemporaryDirectory(prefix="noveltrans-llama-setup-") as temp_dir_str:
-        temp_dir = Path(temp_dir_str)
-        for index, asset in enumerate(assets, start=1):
-            asset_name = str(asset["name"])
-            archive_path = temp_dir / asset_name
-            extract_dir = temp_dir / f"extract-{index}"
-            extract_dir.mkdir(parents=True, exist_ok=True)
-
-            download_file(
-                str(asset["browser_download_url"]),
-                archive_path,
-                asset_name,
-                index,
-                len(assets),
-                request_headers=GITHUB_API_HEADERS,
-                render_progress=lambda asset_name, percent, speed_mbps: _render_llama_runtime_download_progress(
-                    asset_name,
-                    runtime_dir,
-                    percent,
-                    speed_mbps,
-                ),
-            )
-
-            with ZipFile(archive_path) as archive:
-                archive.extractall(extract_dir)
-            log_runtime_event(
-                f"llama asset extracted | asset={asset_name} | archive_path={archive_path} | extract_dir={extract_dir}"
-            )
-
-            source_root = get_single_root_or_self(extract_dir)
-            for child in source_root.iterdir():
-                destination = runtime_dir / child.name
-                if child.is_dir():
-                    shutil.copytree(child, destination, dirs_exist_ok=True)
-                else:
-                    shutil.copy2(child, destination)
-            log_runtime_event(f"llama asset copied | asset={asset_name} | runtime_dir={runtime_dir}")
-
-    server_path = runtime_dir / "llama-server.exe"
-    if not server_path.is_file():
-        raise RuntimeError("Downloaded llama.cpp asset did not contain llama-server.exe")
-
-
-def get_single_root_or_self(path: Path) -> Path:
-    children = list(path.iterdir())
-    if len(children) == 1 and children[0].is_dir():
-        return children[0]
-    return path
-
-
-def write_runtime_metadata(
-    runtime_dir: Path,
-    release_tag: object,
-    assets: list[dict[str, object]],
-    cuda_version: tuple[int, int] | None,
-) -> None:
-    metadata = {
-        "release_tag": release_tag,
-        "asset_names": [asset.get("name") for asset in assets],
-        "cuda_version": f"{cuda_version[0]}.{cuda_version[1]}" if cuda_version else None,
-    }
-    metadata_path = runtime_dir / LLAMA_RUNTIME_METADATA
-    metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
-
-
-def _run_command(command: list[str]) -> str | None:
-    try:
-        completed = subprocess.run(
-            command,
-            check=False,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="ignore",
-            timeout=10,
-        )
-    except (FileNotFoundError, OSError, subprocess.SubprocessError):
-        return None
-
-    stdout = completed.stdout.strip()
-    stderr = completed.stderr.strip()
-    combined = "\n".join(part for part in (stdout, stderr) if part)
-    return combined or None
 
 
 def _is_truthy(value: str | None) -> bool:

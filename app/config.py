@@ -56,6 +56,8 @@ EDITABLE_ENV_KEYS = [
     "TOP_P",
     "N_PREDICT",
     "CTX_SIZE",
+    "GPU_LAYERS",
+    "THREADS",
     "STARTUP_TIMEOUT",
 ]
 DEFAULT_ENV_VALUES = {
@@ -73,6 +75,8 @@ DEFAULT_ENV_VALUES = {
     "TOP_P": "0.9",
     "N_PREDICT": "1800",
     "CTX_SIZE": "8192",
+    "GPU_LAYERS": "",
+    "THREADS": "",
     "STARTUP_TIMEOUT": "180",
 }
 DEFAULT_ENV_CONTENT = "\n".join(f"{key}={value}" for key, value in DEFAULT_ENV_VALUES.items()) + "\n"
@@ -150,6 +154,8 @@ class RuntimeSettings:
     top_p: float
     n_predict: int
     ctx_size: int
+    gpu_layers: int | None
+    threads: int | None
     startup_timeout: int
 
 
@@ -229,6 +235,22 @@ def _get_int(name: str, default: int) -> int:
     except ValueError:
         _warn_invalid_env(name, value, default)
         return default
+
+
+def _get_optional_int(name: str) -> int | None:
+    value = os.getenv(name)
+    if value is None:
+        return None
+
+    normalized = value.strip()
+    if not normalized:
+        return None
+
+    try:
+        return int(normalized)
+    except ValueError:
+        _warn_invalid_env(name, value, None)
+        return None
 
 
 def _get_float(name: str, default: float) -> float:
@@ -376,6 +398,8 @@ def get_runtime_settings() -> RuntimeSettings:
         top_p=_get_float("TOP_P", float(DEFAULT_ENV_VALUES["TOP_P"])),
         n_predict=_get_int("N_PREDICT", int(DEFAULT_ENV_VALUES["N_PREDICT"])),
         ctx_size=_get_int("CTX_SIZE", int(DEFAULT_ENV_VALUES["CTX_SIZE"])),
+        gpu_layers=_get_optional_int("GPU_LAYERS"),
+        threads=_get_optional_int("THREADS"),
         startup_timeout=_get_int("STARTUP_TIMEOUT", int(DEFAULT_ENV_VALUES["STARTUP_TIMEOUT"])),
     )
 

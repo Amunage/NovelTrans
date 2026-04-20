@@ -17,6 +17,7 @@ from app.ui import (
     render_crawler_error_screen,
     render_crawler_screen,
 )
+from app.utils import parse_chapter_selection
 
 
 OUTPUT_PATH = get_runtime_settings().source_path
@@ -37,34 +38,6 @@ def _filter_chapters(
         if (start_chapter is None or chapter[0] >= start_chapter)
         and (end_chapter is None or chapter[0] <= end_chapter)
     ]
-
-
-def _parse_chapter_range(range_input: str) -> tuple[int | None, int | None, bool]:
-    start_chapter = None
-    end_chapter = None
-
-    if not range_input:
-        return start_chapter, end_chapter, True
-
-    if "~" in range_input:
-        parts = range_input.split("~")
-    elif "-" in range_input:
-        parts = range_input.split("-")
-    else:
-        parts = [range_input]
-
-    try:
-        if len(parts) == 2:
-            start_chapter = int(parts[0].strip()) if parts[0].strip() else None
-            end_chapter = int(parts[1].strip()) if parts[1].strip() else None
-        elif len(parts) == 1:
-            start_chapter = end_chapter = int(parts[0].strip())
-        else:
-            return None, None, False
-    except ValueError:
-        return None, None, False
-
-    return start_chapter, end_chapter, True
 
 
 class NovelCrawler:
@@ -344,8 +317,16 @@ def main() -> int:
                 if command == "exit":
                     return 130
 
-                start_chapter, end_chapter, is_valid = _parse_chapter_range(range_input)
-                if not is_valid:
+                if not range_input:
+                    start_chapter, end_chapter = None, None
+                else:
+                    selection = parse_chapter_selection(range_input)
+                    if selection is None:
+                        status_message = "[ERROR] 범위 형식이 잘못되었습니다. 다시 입력해주세요."
+                        continue
+                    start_chapter, end_chapter = selection
+
+                if start_chapter is not None and end_chapter is not None and start_chapter > end_chapter:
                     status_message = "[ERROR] 범위 형식이 잘못되었습니다. 다시 입력해주세요."
                     continue
 

@@ -232,8 +232,8 @@ def parse_args() -> TranslationConfig:
     parser.add_argument("--top-p", type=float, default=runtime_settings.top_p)
     parser.add_argument("--n-predict", type=int, default=runtime_settings.n_predict)
     parser.add_argument("--ctx-size", type=int, default=runtime_settings.ctx_size)
-    parser.add_argument("--gpu-layers", type=int)
-    parser.add_argument("--threads", type=int)
+    parser.add_argument("--gpu-layers", type=int, default=runtime_settings.gpu_layers)
+    parser.add_argument("--threads", type=int, default=runtime_settings.threads)
     parser.add_argument("--sleep", type=float, default=0.0)
     parser.add_argument("--startup-timeout", type=int, default=runtime_settings.startup_timeout)
     args = parser.parse_args()
@@ -355,11 +355,14 @@ def main() -> int:
                 progress_callback("다듬기 생략", 1, 1, "[INFO] 다듬기가 꺼져 있어 초벌 번역을 최종 결과로 저장합니다.")
                 atomic_write_text(output_path, build_translated_document(translated_title, translated_chunks))
 
+        stop_llama_server(server_process)
+        server_process = None
         render_translation_complete_screen(
             total_files=len(selected_source_files),
             completed_files=len(selected_source_files),
             output_root=config.output_root,
             last_output_path=last_output_path,
+            elapsed_seconds=int(time.monotonic() - translation_started_at),
             status_message="[INFO] 모든 번역 파일 처리가 완료되었습니다.",
         )
         input("")
