@@ -3,8 +3,14 @@ from __future__ import annotations
 import os
 import sys
 
-from app.config import get_log_path, get_translation_block_reason, log_runtime_event
+from app.config import (
+    get_glossary_candidate_block_reason,
+    get_log_path,
+    get_translation_block_reason,
+    log_runtime_event,
+)
 from app.controller import run_settings_menu
+from app.glossary import main as glossary_main
 from app.setup import ensure_runtime_setup
 
 from app.client import main as translation_main
@@ -35,6 +41,18 @@ def main() -> int:
                     continue
 
                 result = translation_main()
+                status_message = None
+                if result == 130:
+                    return 130
+                continue
+
+            if choice == "3":
+                block_reason = get_glossary_candidate_block_reason()
+                if block_reason is not None:
+                    status_message = block_reason
+                    continue
+
+                result = glossary_main()
                 status_message = None
                 if result == 130:
                     return 130

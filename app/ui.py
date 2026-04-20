@@ -72,6 +72,7 @@ def render_main_menu(status_message: str | None = None) -> None:
     print("-" * 60)
     print("[1] 추출")
     print("[2] 번역")
+    print("[3] 용어집")
     print("[9] 설정")
     print("[0] 종료")
     print("-" * 60)
@@ -329,6 +330,71 @@ def render_translation_complete_screen(
     print(f"출력 폴더: {output_root}")
     if last_output_path is not None:
         print(f"결과 파일: {last_output_path}")
+    print("-" * 60)
+    print(status_message or "")
+    print("-" * 60)
+
+
+def render_glossary_selection_screen(
+    *,
+    source_root: Path,
+    novel_dirs: Sequence[Path],
+    status_message: str | None = None,
+) -> None:
+    clear_screen()
+    _print_header("용어집 생성")
+    print("/b 돌아가기 /m 메인메뉴")
+    print("-" * 60)
+    print(f"소설 폴더: {source_root}")
+    print("탐색할 소설 번호를 입력해 주세요.")
+    print("-" * 60)
+    for index, novel_dir in enumerate(novel_dirs, start=1):
+        print(f"[{index}] {novel_dir.name}")
+    print("-" * 60)
+    print(status_message or "")
+    print("-" * 60)
+
+
+def render_glossary_candidate_progress_screen(status_message: str | None = None) -> None:
+    clear_screen()
+    _print_header("용어집 생성")
+    print("-" * 60)
+    print(status_message or "")
+    print("-" * 60)
+
+
+def render_glossary_refine_progress_screen(
+    *,
+    novel_name: str,
+    batch_index: int,
+    total_batches: int,
+    accepted_count: int,
+    status_message: str | None = None,
+) -> None:
+    clear_screen()
+    _print_header("용어집 생성")
+    print(f"소설: {novel_name}")
+    print(f"용어 정제: {_build_progress_bar(batch_index, total_batches)} {batch_index}/{max(total_batches, 1)}")
+    print(f"확정 용어: {accepted_count}")
+    print("-" * 60)
+    print(status_message or "")
+    print("-" * 60)
+
+
+def render_glossary_complete_screen(
+    *,
+    output_path: Path,
+    candidate_count: int,
+    elapsed_seconds: int,
+    status_message: str | None = None,
+) -> None:
+    clear_screen()
+    _print_header("용어집 생성 완료")
+    print("용어집 생성 완료. 엔터를 누르면 메인 메뉴로 돌아갑니다.")
+    print("-" * 60)
+    print(f"저장 파일: {output_path}")
+    print(f"용어 개수: {candidate_count}")
+    print(f"걸린 시간: {_format_elapsed_time(elapsed_seconds)}")
     print("-" * 60)
     print(status_message or "")
     print("-" * 60)
