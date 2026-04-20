@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import unicodedata
 from pathlib import Path
 from typing import Sequence
 
@@ -54,6 +55,18 @@ def _build_progress_bar(current: int, total: int, width: int = 28) -> str:
     safe_current = max(0, min(current, safe_total))
     filled = round((safe_current / safe_total) * width)
     return f"[{'#' * filled}{'-' * (width - filled)}]"
+
+
+def _get_display_width(value: str) -> int:
+    width = 0
+    for char in value:
+        width += 2 if unicodedata.east_asian_width(char) in {"F", "W", "A"} else 1
+    return width
+
+
+def _pad_display(value: str, width: int) -> str:
+    padding = max(0, width - _get_display_width(value))
+    return value + (" " * padding)
 
 
 def _format_elapsed_time(elapsed_seconds: int) -> str:
@@ -435,9 +448,30 @@ def prompt_for_model_download(
     print(format_system_specs(system_specs))
     print("-" * 60)
     print("선택 가능한 모델:")
+    rows = [build_model_option_row(option) for option in model_options]
+    label_width = max([_get_display_width("모델"), *(_get_display_width(row["label"]) for row in rows)], default=0)
+    filename_width = max([_get_display_width("파일명"), *(_get_display_width(row["filename"]) for row in rows)], default=0)
+    size_width = max([_get_display_width("크기"), *(_get_display_width(row["size_text"]) for row in rows)], default=0)
+    vram_width = max([_get_display_width("권장 VRAM"), *(_get_display_width(row["vram_text"]) for row in rows)], default=0)
+    header = (
+        f"     {_pad_display('모델', label_width)} | "
+        f"{_pad_display('파일명', filename_width)} | "
+        f"{_pad_display('크기', size_width)} | "
+        f"{_pad_display('권장 VRAM', vram_width)} | 설명"
+    )
+    print(header)
+    print(f"     {'-' * label_width}-+-{'-' * filename_width}-+-{'-' * size_width}-+-{'-' * vram_width}-+ {'-' * 20}")
     for index, option in enumerate(model_options, start=1):
         prefix = "*" if index - 1 == recommended_index else " "
-        print(f"{prefix}[{index}] {format_model_option(option)}")
+        row = rows[index - 1]
+        print(
+            f"{prefix}[{index}] "
+            f"{_pad_display(row['label'], label_width)} | "
+            f"{_pad_display(row['filename'], filename_width)} | "
+            f"{_pad_display(row['size_text'], size_width)} | "
+            f"{_pad_display(row['vram_text'], vram_width)} | "
+            f"{row['summary']}"
+        )
     print(" [0] 돌아가기")
     print("-" * 60)
 
@@ -464,8 +498,16 @@ def format_system_specs(system_specs: dict[str, object]) -> str:
     )
 
 
-def format_model_option(option: dict[str, object]) -> str:
+def build_model_option_row(option: dict[str, object]) -> dict[str, str]:
     size_bytes = option.get("size_bytes")
     size_gb = size_bytes / (1024**3) if isinstance(size_bytes, int) else None
     size_text = f"{size_gb:.1f} GB" if size_gb is not None else "크기 미확인"
-    return f"{option['label']} | {option['filename']} | {size_text} | {option['summary']}"
+    min_vram_gb = option.get("min_vram_gb")
+    vram_text = f"{int(min_vram_gb)} GB+" if isinstance(min_vram_gb, (int, float)) else "정보 없음"
+    return {
+        "label": str(option["label"]),
+        "filename": str(option["filename"]),
+        "size_text": size_text,
+        "vram_text": vram_text,
+        "summary": str(option["summary"]),
+    }

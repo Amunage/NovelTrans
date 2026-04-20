@@ -33,7 +33,6 @@ HIRAGANA_PATTERN = re.compile(r"[\u3041-\u3096]")
 KANJI_PATTERN = re.compile(r"[\u4e00-\u9faf]")
 KATAKANA_PATTERN = re.compile(r"[\u30a1-\u30f4]")
 SENTENCE_SPLIT_PATTERN = re.compile(r"(?<=[\u3002\uff01\uff1f!?])\s+|\n+")
-STOP_TERMS_PATH = APP_ROOT / "glossary" / "stop_terms.txt"
 
 MIN_TERM_COUNT = 2
 MIN_FILE_COUNT = 2
@@ -78,17 +77,6 @@ GLOSSARY_SYSTEM_INSTRUCTIONS = [
     "Values must be concise, natural Korean glossary entries.",
     "Do not include explanations or markdown.",
 ]
-def _load_stop_terms() -> set[str]:
-    stop_terms: set[str] = set()
-    if not STOP_TERMS_PATH.is_file():
-        return stop_terms
-
-    for raw_line in STOP_TERMS_PATH.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        stop_terms.add(line)
-    return stop_terms
 
 
 def _get_tokenizer() -> Any | None:
@@ -139,10 +127,8 @@ def _is_mixed_kanji_katakana(term: str) -> bool:
     return _has_kanji(term) and _has_katakana(term)
 
 
-def _is_valid_term(term: str, stop_terms: set[str]) -> bool:
+def _is_valid_term(term: str) -> bool:
     if len(term) < 2:
-        return False
-    if term in stop_terms:
         return False
     if not KANJI_OR_KATAKANA_PATTERN.search(term):
         return False
@@ -246,12 +232,12 @@ def _has_honorific_context(term: str, sentences: list[str]) -> bool:
     return False
 
 
-def _has_cooccurring_proper_noun(term: str, sentences: list[str], stop_terms: set[str]) -> bool:
+def _has_cooccurring_proper_noun(term: str, sentences: list[str]) -> bool:
     for sentence in sentences:
         found_terms: set[str] = set()
         for match in TERM_PATTERN.finditer(sentence):
             candidate = _normalize_term(match.group(0))
-            if candidate == term or not _is_valid_term(candidate, stop_terms):
+            if candidate == term or not _is_valid_term(candidate):
                 continue
             found_terms.add(candidate)
         if found_terms:
@@ -264,7 +250,6 @@ def _score_term(
     count: int,
     file_count: int,
     sentences: list[str],
-    stop_terms: set[str],
 ) -> float:
     score = 0.0
     score += min(count, 8) * 0.35
@@ -276,7 +261,7 @@ def _score_term(
         score += 1.4
     if _has_honorific_context(term, sentences):
         score += 2.2
-    if _has_cooccurring_proper_noun(term, sentences, stop_terms):
+    if _has_cooccurring_proper_noun(term, sentences):
         score += 1.2
 
     compact_term = term.replace(" ", "")
@@ -510,7 +495,6 @@ def save_final_glossary(novel_dir: Path, glossary: dict[str, str]) -> Path:
 
 
 def extract_glossary_candidates(novel_dir: Path) -> dict[str, str]:
-    stop_terms = _load_stop_terms()
     chapter_files = find_chapter_files(novel_dir)
     term_counts: Counter[str] = Counter()
     file_counts: Counter[str] = Counter()
@@ -524,7 +508,7 @@ def extract_glossary_candidates(novel_dir: Path) -> dict[str, str]:
 
         for match in TERM_PATTERN.finditer(chapter_text):
             term = _normalize_term(match.group(0))
-            if not _is_valid_term(term, stop_terms):
+            if not _is_valid_term(term):
                 continue
             if _is_embedded_kanji_stem(chapter_text, match.start(), match.end(), term):
                 continue
@@ -538,7 +522,7 @@ def extract_glossary_candidates(novel_dir: Path) -> dict[str, str]:
             found_terms: set[str] = set()
             for match in TERM_PATTERN.finditer(sentence):
                 term = _normalize_term(match.group(0))
-                if not _is_valid_term(term, stop_terms):
+                if not _is_valid_term(term):
                     continue
                 if _is_embedded_kanji_stem(sentence, match.start(), match.end(), term):
                     continue
@@ -556,7 +540,7 @@ def extract_glossary_candidates(novel_dir: Path) -> dict[str, str]:
         sentences = sentences_by_term.get(term, [])
         if _is_dictionary_word(term) and not _has_name_like_usage(term, sentences):
             continue
-        term_score = _score_term(term, count, file_counts[term], sentences, stop_terms)
+        term_score = _score_term(term, count, file_counts[term], sentences)
         if term_score < MIN_TERM_SCORE:
             continue
         candidates[term] = _choose_example_sentence(term, sentences)
