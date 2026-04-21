@@ -9,6 +9,7 @@ import cloudscraper
 from bs4 import BeautifulSoup
 
 from app.config import SEPARATOR_LINE, get_runtime_settings, log_runtime_event
+from app.selenium import SeleniumPageFetcher
 from app.sites import Chapter, resolve_extractor
 from app.ui import (
     parse_command,
@@ -65,11 +66,17 @@ class NovelCrawler:
         self.retry_count = 3
         self.retry_delay = 3.0
         self.novel_title: str | None = None
+        self.selenium_fetcher: SeleniumPageFetcher | None = None
         self.last_output_path: Path | None = None
         self.last_failed_count = 0
         self.last_success_count = 0
         self.last_total_count = 0
         self.last_error_message: str | None = None
+
+    def close(self) -> None:
+        if self.selenium_fetcher is not None:
+            self.selenium_fetcher.close()
+            self.selenium_fetcher = None
 
     def get_page(self, url: str, prompt_on_error: bool = True) -> BeautifulSoup | None:
         log_runtime_event(f"crawler page request start | url={url}")
@@ -83,28 +90,20 @@ class NovelCrawler:
                 response = self.session.get(url, timeout=30)
                 response.encoding = response.apparent_encoding or "utf-8"
                 if self._is_cloudflare_challenge(response):
-                    error = RuntimeError(
-                        "403 Forbidden: Cloudflare 차단 페이지를 받았습니다. "
+                    fallback_soup = self._get_page_with_selenium(
+                        url,
+                        reason=f"cloudflare challenge ({response.status_code})",
                     )
-                    self.last_error_message = str(error)
-                    log_runtime_event(
-                        f"crawler page blocked | url={url} | status={response.status_code} | "
-                        f"reason=cloudflare"
-                    )
-                    print(f"[ERROR] 페이지 로드 실패: {error}")
-                    if prompt_on_error:
-                        return self._handle_error(url, error)
-                    return None
+                    if fallback_soup is not None:
+                        return fallback_soup
+                    error = RuntimeError("403 Forbidden: Cloudflare 차단 페이지를 받았습니다.")
+                    return self._handle_page_error(url, error, prompt_on_error)
                 if response.status_code == 403:
-                    error = RuntimeError(
-                        "403 Forbidden: 사이트가 자동 추출 요청을 거부했습니다. "
-                    )
-                    self.last_error_message = str(error)
-                    log_runtime_event(f"crawler page blocked | url={url} | status=403")
-                    print(f"[ERROR] 페이지 로드 실패: {error}")
-                    if prompt_on_error:
-                        return self._handle_error(url, error)
-                    return None
+                    fallback_soup = self._get_page_with_selenium(url, reason="403 forbidden")
+                    if fallback_soup is not None:
+                        return fallback_soup
+                    error = RuntimeError("403 Forbidden: 사이트가 자동 추출 요청을 거부했습니다.")
+                    return self._handle_page_error(url, error, prompt_on_error)
                 response.raise_for_status()
                 self.last_error_message = None
                 log_runtime_event(
@@ -128,6 +127,37 @@ class NovelCrawler:
                 return None
 
         return None
+
+    def _handle_page_error(
+        self,
+        url: str,
+        error: Exception,
+        prompt_on_error: bool,
+    ) -> BeautifulSoup | None:
+        self.last_error_message = str(error)
+        log_runtime_event(f"crawler page blocked | url={url} | error={error!r}")
+        print(f"[ERROR] 페이지 로드 실패: {error}")
+        if prompt_on_error:
+            return self._handle_error(url, error)
+        return None
+
+    def _get_page_with_selenium(self, url: str, reason: str) -> BeautifulSoup | None:
+        log_runtime_event(f"crawler selenium fallback start | url={url} | reason={reason}")
+        print(f"[INFO] cloudscraper 차단 감지({reason}). Selenium fallback으로 재시도합니다.")
+
+        try:
+            if self.selenium_fetcher is None:
+                self.selenium_fetcher = SeleniumPageFetcher(self.session)
+            html = self.selenium_fetcher.fetch_html(url)
+        except Exception as error:
+            self.last_error_message = f"Selenium fallback 실패: {error}"
+            log_runtime_event(f"crawler selenium fallback failed | url={url} | error={error!r}")
+            print(f"[ERROR] Selenium fallback 실패: {error}")
+            return None
+
+        self.last_error_message = None
+        log_runtime_event(f"crawler selenium fallback success | url={url} | bytes={len(html.encode('utf-8'))}")
+        return BeautifulSoup(html, "html.parser")
 
     @staticmethod
     def _is_cloudflare_challenge(response) -> bool:
@@ -323,8 +353,12 @@ def main() -> int:
                 command = parse_command(novel_url)
 
                 if command in {"main", "back"}:
+                    if crawler is not None:
+                        crawler.close()
                     return 0
                 if command == "exit":
+                    if crawler is not None:
+                        crawler.close()
                     return 130
 
                 if not novel_url:
@@ -361,12 +395,18 @@ def main() -> int:
                 command = parse_command(range_input)
 
                 if command == "main":
+                    if crawler is not None:
+                        crawler.close()
                     return 0
                 if command == "back":
+                    if crawler is not None:
+                        crawler.close()
                     step = "url"
                     status_message = None
                     continue
                 if command == "exit":
+                    if crawler is not None:
+                        crawler.close()
                     return 130
 
                 if not range_input:
@@ -397,13 +437,19 @@ def main() -> int:
                 command = parse_command(delay_input)
 
                 if command == "main":
+                    if crawler is not None:
+                        crawler.close()
                     return 0
                 if command == "back":
+                    if crawler is not None:
+                        crawler.close()
                     step = "range"
                     status_message = None
                     founded = chapters
                     continue
                 if command == "exit":
+                    if crawler is not None:
+                        crawler.close()
                     return 130
 
                 try:
@@ -444,3 +490,6 @@ def main() -> int:
         log_runtime_event(f"crawler main failed | error={exc!r}\n{traceback.format_exc()}")
         print(f"[ERROR] {exc}")
         return 1
+    finally:
+        if crawler is not None:
+            crawler.close()

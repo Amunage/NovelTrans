@@ -424,6 +424,10 @@ def get_translation_block_reason() -> str | None:
 def get_glossary_candidate_block_reason() -> str | None:
     from app.utils import find_chapter_files, find_source_novels
 
+    model_path = get_configured_model_path()
+    if not model_path.is_file():
+        return "[ERROR] GGUF 모델이 없습니다. 설정을 확인해 주세요."
+
     source_path = get_configured_source_path()
     if not source_path.exists() or not source_path.is_dir():
         return "[ERROR] 원문 폴더가 없습니다. 설정을 확인해주세요."
