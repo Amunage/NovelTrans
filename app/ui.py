@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import unicodedata
+import webbrowser
 from pathlib import Path
 from typing import Sequence
 
@@ -26,10 +27,11 @@ SETTING_DESCRIPTIONS = {
     "TOP_P": "0.0 ~ 1.0 | 낮을수록 좁게 선택, 높을수록 다양하게 선택",
     "N_PREDICT": "정수 | 최대 출력 토큰 수",
     "CTX_SIZE": "정수 | 모델 컨텍스트 크기",
-    "GPU_LAYERS": "정수 또는 빈 값 | GPU에 올릴 레이어 수, 비우면 기본값 사용",
-    "THREADS": "정수 또는 빈 값 | CPU 스레드 수, 비우면 기본값 사용",
+    "GPU_LAYERS": "정수 또는 auto | GPU에 올릴 레이어 수, auto=기본값",
+    "THREADS": "정수 또는 auto | CPU 스레드 수, auto=기본값",
     "STARTUP_TIMEOUT": "양의 정수(초) | 서버 시작 대기 시간",
 }
+AUTO_DISPLAY_ENV_KEYS = {"GPU_LAYERS", "THREADS"}
 
 
 def parse_command(value: str) -> str | None:
@@ -76,6 +78,12 @@ def _format_elapsed_time(elapsed_seconds: int) -> str:
     if hours > 0:
         return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
     return f"{minutes:02d}:{seconds:02d}"
+
+
+def format_env_setting_value(key: str, value: str) -> str:
+    if key in AUTO_DISPLAY_ENV_KEYS and value.strip() == "":
+        return "auto"
+    return value
 
 
 def render_main_menu(status_message: str | None = None) -> None:
@@ -125,8 +133,10 @@ def render_env_settings_menu(
     print("원하는 작업 번호를 입력해 주세요.")
     print("-" * 60)
     for index, (key, value) in enumerate(items, start=1):
-        print(f"[{index}] {key} = {value}")
+        print(f"[{index}] {key} = {format_env_setting_value(key, value)}")
+    print("-" * 60)
     print("[0] 돌아가기")
+    print("[-] 초기화")
     print("-" * 60)
     print(status_message or "")
     print("-" * 60)
@@ -140,9 +150,17 @@ def prompt_env_settings_menu(
     return input("").strip()
 
 
+def prompt_env_reset_confirmation(
+    items: Sequence[tuple[str, str]],
+    status_message: str,
+) -> str:
+    render_env_settings_menu(items, status_message)
+    return input("").strip().lower()
+
+
 def build_env_setting_status_message(key: str, value: str) -> str:
     description = SETTING_DESCRIPTIONS.get(key, "")
-    status_message = f"{key} 현재값: {value}"
+    status_message = f"{key} 현재값: {format_env_setting_value(key, value)}"
     if description:
         status_message = f"{status_message} ({description})"
     return status_message
@@ -157,6 +175,10 @@ def prompt_env_setting_value(
     message = status_message or build_env_setting_status_message(key, value)
     render_env_settings_menu(items, message)
     return input("새 값 입력 (빈값이면 취소): ").strip()
+
+
+def prompt_missing_path(label: str, default_path: Path) -> str:
+    return input(f"{label} (기본: {default_path}): ").strip().strip('"')
 
 
 def render_crawler_screen(
@@ -184,6 +206,15 @@ def render_crawler_screen(
     print("-" * 60)
 
 
+def prompt_crawler_screen(
+    step: str,
+    status_message: str | None = None,
+    chapters: Sequence[ChapterLike] | None = None,
+) -> str:
+    render_crawler_screen(step, status_message, chapters)
+    return input("").strip()
+
+
 def render_crawler_error_screen(
     url: str,
     error: Exception,
@@ -209,6 +240,34 @@ def render_crawler_error_screen(
         print("  [2] 이 챕터 다시 시도")
         print("  [3] 이후 오류는 모두 자동 건너뛰기")
         print("  [4] 추출 중단")
+
+
+def prompt_crawler_error_choice(
+    url: str,
+    error: Exception,
+    status_message: str | None = None,
+) -> str:
+    render_crawler_error_screen(url, error, status_message=status_message)
+    return input("선택 (1/2/3/4): ").strip()
+
+
+def prompt_crawler_retry_wait(
+    url: str,
+    error: Exception,
+    status_message: str | None = None,
+) -> str:
+    render_crawler_error_screen(
+        url,
+        error,
+        status_message=status_message,
+        waiting_for_retry=True,
+    )
+    return input("대기 시간(초, 기본 5, 뒤로가기 /b): ").strip()
+
+
+def render_wait_screen(wait_time: float) -> None:
+    clear_screen()
+    print(f"{wait_time}초 대기 중...")
 
 
 def render_crawl_progress_screen(
@@ -472,18 +531,36 @@ def prompt_for_model_download(
             f"{_pad_display(row['vram_text'], vram_width)} | "
             f"{row['summary']}"
         )
+    print("-" * 60)
     print(" [0] 돌아가기")
+    print(" [-] Hugging Face 모델 페이지 열기")
     print("-" * 60)
 
     while True:
         choice = input("").strip().lower()
         if choice == "" or choice == "0":
             return None
+        if choice == "-":
+            webbrowser.open("https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF/tree/main")
+            webbrowser.open("https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/tree/main")
+            print("[INFO] Hugging Face 모델 페이지를 브라우저로 열었습니다.")
+            continue
         if choice.isdigit():
             selected_index = int(choice) - 1
             if 0 <= selected_index < len(model_options):
                 return model_options[selected_index]
         print("[ERROR] 목록 번호를 입력해 주세요.")
+
+
+def prompt_llama_runtime_install(server_path: Path) -> bool:
+    clear_screen()
+    _print_header("llama.cpp 런타임 설치")
+    print("llama-server 실행 파일이 없습니다.")
+    print(f"필요 파일: {server_path}")
+    print("-" * 60)
+    print("지금 llama.cpp 런타임을 설치하시겠습니까? (y/n)")
+    print("-" * 60)
+    return input("").strip().lower() == "y"
 
 
 def format_system_specs(system_specs: dict[str, object]) -> str:

@@ -2,20 +2,23 @@ from __future__ import annotations
 
 import random
 import time
+import traceback
 from pathlib import Path
 
 import cloudscraper
 from bs4 import BeautifulSoup
 
-from app.config import SEPARATOR_LINE, get_runtime_settings
+from app.config import SEPARATOR_LINE, get_runtime_settings, log_runtime_event
 from app.sites import Chapter, resolve_extractor
 from app.ui import (
-    clear_screen,
     parse_command,
+    prompt_crawler_error_choice,
+    prompt_crawler_retry_wait,
+    prompt_crawler_screen,
     render_crawl_complete_screen,
     render_crawl_progress_screen,
-    render_crawler_error_screen,
     render_crawler_screen,
+    render_wait_screen,
 )
 from app.utils import parse_chapter_selection
 
@@ -44,6 +47,9 @@ class NovelCrawler:
     def __init__(self, base_url: str):
         self.extractor = resolve_extractor(base_url)
         self.base_url = self.extractor.normalize_base_url(base_url)
+        log_runtime_event(
+            f"crawler init | input_url={base_url} | normalized_url={self.base_url} | site={self.extractor.site_name}"
+        )
         self.session = cloudscraper.create_scraper(
             browser={
                 "browser": "chrome",
@@ -63,8 +69,10 @@ class NovelCrawler:
         self.last_failed_count = 0
         self.last_success_count = 0
         self.last_total_count = 0
+        self.last_error_message: str | None = None
 
     def get_page(self, url: str, prompt_on_error: bool = True) -> BeautifulSoup | None:
+        log_runtime_event(f"crawler page request start | url={url}")
         for attempt in range(self.retry_count):
             try:
                 if attempt > 0:
@@ -73,10 +81,43 @@ class NovelCrawler:
                     time.sleep(wait_time)
 
                 response = self.session.get(url, timeout=30)
-                response.raise_for_status()
                 response.encoding = response.apparent_encoding or "utf-8"
+                if self._is_cloudflare_challenge(response):
+                    error = RuntimeError(
+                        "403 Forbidden: Cloudflare 차단 페이지를 받았습니다. "
+                    )
+                    self.last_error_message = str(error)
+                    log_runtime_event(
+                        f"crawler page blocked | url={url} | status={response.status_code} | "
+                        f"reason=cloudflare"
+                    )
+                    print(f"[ERROR] 페이지 로드 실패: {error}")
+                    if prompt_on_error:
+                        return self._handle_error(url, error)
+                    return None
+                if response.status_code == 403:
+                    error = RuntimeError(
+                        "403 Forbidden: 사이트가 자동 추출 요청을 거부했습니다. "
+                    )
+                    self.last_error_message = str(error)
+                    log_runtime_event(f"crawler page blocked | url={url} | status=403")
+                    print(f"[ERROR] 페이지 로드 실패: {error}")
+                    if prompt_on_error:
+                        return self._handle_error(url, error)
+                    return None
+                response.raise_for_status()
+                self.last_error_message = None
+                log_runtime_event(
+                    f"crawler page request success | url={url} | status={response.status_code} | "
+                    f"bytes={len(response.content)} | attempt={attempt + 1}/{self.retry_count}"
+                )
                 return BeautifulSoup(response.text, "html.parser")
             except Exception as error:
+                self.last_error_message = str(error)
+                log_runtime_event(
+                    f"crawler page request failed | url={url} | attempt={attempt + 1}/{self.retry_count} | "
+                    f"error={error!r}"
+                )
                 error_msg = str(error)
                 if attempt < self.retry_count - 1 and ("403" in error_msg or "429" in error_msg):
                     continue
@@ -88,6 +129,15 @@ class NovelCrawler:
 
         return None
 
+    @staticmethod
+    def _is_cloudflare_challenge(response) -> bool:
+        text = response.text[:10000]
+        return response.status_code in {403, 429, 503} and (
+            "Just a moment..." in text
+            or "challenges.cloudflare.com" in text
+            or "cf-chl" in text
+        )
+
     def _handle_error(self, url: str, error: Exception) -> BeautifulSoup | None:
         if self.error_mode == "skip":
             print("         자동 스킵")
@@ -97,9 +147,8 @@ class NovelCrawler:
 
         status_message = None
         while True:
-            render_crawler_error_screen(url, error, status_message=status_message)
+            choice = prompt_crawler_error_choice(url, error, status_message=status_message)
             status_message = None
-            choice = input("선택 (1/2/3/4): ").strip()
 
             if choice == "1":
                 return None
@@ -107,14 +156,8 @@ class NovelCrawler:
             if choice == "2":
                 retry_status_message = None
                 while True:
-                    render_crawler_error_screen(
-                        url,
-                        error,
-                        status_message=retry_status_message,
-                        waiting_for_retry=True,
-                    )
+                    wait = prompt_crawler_retry_wait(url, error, status_message=retry_status_message)
                     retry_status_message = None
-                    wait = input("대기 시간(초, 기본 5, 뒤로가기 /b): ").strip()
                     if parse_command(wait) == "back":
                         break
 
@@ -124,8 +167,7 @@ class NovelCrawler:
                         retry_status_message = "숫자 또는 /b만 입력해주세요."
                         continue
 
-                    clear_screen()
-                    print(f"{wait_time}초 대기 중...")
+                    render_wait_screen(wait_time)
                     time.sleep(wait_time)
                     return self.get_page(url)
 
@@ -152,9 +194,6 @@ class NovelCrawler:
             return ""
         return self.extractor.extract_content(soup)
 
-    def clean_text(self, text: str) -> str:
-        return self.extractor.clean_text(text)
-
     def get_chapter_title(self, soup: BeautifulSoup) -> str:
         if not soup:
             return ""
@@ -169,6 +208,10 @@ class NovelCrawler:
         output_dir: Path = OUTPUT_PATH,
     ) -> list[tuple[int, str, str]]:
         if chapters is None:
+            log_runtime_event(
+                f"crawler crawl start | url={self.base_url} | delay={delay} | "
+                f"start={start_chapter} | end={end_chapter}"
+            )
             print(f"[INFO] 소설 페이지 분석 중: {self.base_url}")
             print("[INFO] 메인 페이지 접속 중...")
             main_soup = self.get_page(self.base_url)
@@ -179,8 +222,14 @@ class NovelCrawler:
             time.sleep(2)
             chapters = self.get_chapter_links()
             if not chapters:
+                log_runtime_event(f"crawler crawl aborted | url={self.base_url} | reason=no_chapters")
                 print("[ERROR] 챕터를 찾을 수 없습니다.")
                 return []
+        else:
+            log_runtime_event(
+                f"crawler crawl start | url={self.base_url} | delay={delay} | "
+                f"start={start_chapter} | end={end_chapter} | provided_chapters={len(chapters)}"
+            )
 
         if start_chapter or end_chapter:
             chapters = _filter_chapters(chapters, start_chapter, end_chapter)
@@ -241,10 +290,11 @@ class NovelCrawler:
 
         self.last_failed_count = len(failed_chapters)
         self.last_success_count = len(results)
+        log_runtime_event(
+            f"crawler crawl complete | url={self.base_url} | total={total} | "
+            f"success={self.last_success_count} | failed={self.last_failed_count} | output_dir={save_path}"
+        )
         return results
-
-    def _sanitize_filename(self, filename: str) -> str:
-        return self.extractor.sanitize_filename(filename)
 
     def _get_novel_output_path(self, output_dir: Path) -> Path:
         novel_folder = self.novel_title or "unknown_novel"
@@ -269,8 +319,7 @@ def main() -> int:
 
         while True:
             if step == "url":
-                render_crawler_screen(step, status_message, founded)
-                novel_url = input("").strip()
+                novel_url = prompt_crawler_screen(step, status_message, founded)
                 command = parse_command(novel_url)
 
                 if command in {"main", "back"}:
@@ -287,6 +336,7 @@ def main() -> int:
                 try:
                     crawler = NovelCrawler(novel_url)
                 except ValueError as error:
+                    log_runtime_event(f"crawler url rejected | url={novel_url} | error={error!r}")
                     status_message = f"[ERROR] {error}"
                     continue
 
@@ -295,7 +345,10 @@ def main() -> int:
                 end_chapter = None
 
                 if not chapters:
-                    status_message = "[ERROR] 챕터를 찾을 수 없습니다. URL을 다시 확인해주세요."
+                    if crawler.last_error_message:
+                        status_message = f"[ERROR] {crawler.last_error_message}"
+                    else:
+                        status_message = "[ERROR] 챕터를 찾을 수 없습니다. URL을 다시 확인해주세요."
                     continue
 
                 step = "range"
@@ -304,8 +357,7 @@ def main() -> int:
                 continue
 
             if step == "range":
-                render_crawler_screen(step, status_message, founded)
-                range_input = input("").strip()
+                range_input = prompt_crawler_screen(step, status_message, founded)
                 command = parse_command(range_input)
 
                 if command == "main":
@@ -341,8 +393,7 @@ def main() -> int:
                 continue
 
             if step == "delay":
-                render_crawler_screen(step, status_message, founded)
-                delay_input = input("").strip()
+                delay_input = prompt_crawler_screen(step, status_message, founded)
                 command = parse_command(delay_input)
 
                 if command == "main":
@@ -378,6 +429,7 @@ def main() -> int:
                     )
                     input("")
                 except Exception as error:
+                    log_runtime_event(f"crawler run failed | error={error!r}\n{traceback.format_exc()}")
                     print(f"\n[ERROR] 크롤링 중 오류 발생: {error}")
                     return 1
 
@@ -385,8 +437,10 @@ def main() -> int:
 
         return 0
     except KeyboardInterrupt:
+        log_runtime_event("crawler cancelled by user")
         print("\n[INFO] 사용자가 작업을 중단했습니다.")
         return 130
     except Exception as exc:
+        log_runtime_event(f"crawler main failed | error={exc!r}\n{traceback.format_exc()}")
         print(f"[ERROR] {exc}")
         return 1

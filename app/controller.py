@@ -2,13 +2,22 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.config import get_env_settings_items, get_runtime_settings, log_runtime_event, update_env_setting
+from app.config import (
+    get_env_settings_items,
+    get_runtime_settings,
+    log_runtime_event,
+    reset_env_settings_to_defaults,
+    update_env_setting,
+)
 from app.setup import run_model_download_setup
 from app.translation import TranslationConfig, build_output_path
 from app.ui import (
+    format_env_setting_value,
     parse_command,
+    prompt_env_reset_confirmation,
     prompt_env_setting_value,
     prompt_env_settings_menu,
+    prompt_missing_path,
     prompt_settings_menu,
     render_settings_menu,
     render_translation_selection_screen,
@@ -22,9 +31,13 @@ UNIT_FLOAT_KEYS = {"TOP_P"}
 
 
 def validate_env_setting_value(key: str, new_value: str) -> str | None:
+    normalized_value = new_value.strip()
+    if key in OPTIONAL_POSITIVE_INT_KEYS and normalized_value.lower() == "auto":
+        return None
+
     if "TEMPERATURE" in key or key in UNIT_FLOAT_KEYS:
         try:
-            numeric_value = float(new_value)
+            numeric_value = float(normalized_value)
         except ValueError:
             return f"[ERROR] {key} 값을 숫자로 입력해 주세요."
 
@@ -33,7 +46,7 @@ def validate_env_setting_value(key: str, new_value: str) -> str | None:
 
     if key in POSITIVE_INT_KEYS or key in OPTIONAL_POSITIVE_INT_KEYS:
         try:
-            int_value = int(new_value)
+            int_value = int(normalized_value)
         except ValueError:
             return f"[ERROR] {key} 값을 정수로 입력해 주세요."
 
@@ -46,6 +59,13 @@ def validate_env_setting_value(key: str, new_value: str) -> str | None:
     return None
 
 
+def normalize_env_setting_value(key: str, new_value: str) -> str:
+    normalized_value = new_value.strip()
+    if key in OPTIONAL_POSITIVE_INT_KEYS and normalized_value.lower() == "auto":
+        return ""
+    return normalized_value
+
+
 def validate_menu_number(choice: str, item_count: int) -> str | None:
     if not choice.isdigit():
         return "[ERROR] 목록 번호를 입력해 주세요."
@@ -55,21 +75,6 @@ def validate_menu_number(choice: str, item_count: int) -> str | None:
         return "[ERROR] 목록에 있는 번호를 입력해 주세요."
 
     return None
-
-
-def parse_positive_float_input(raw: str, *, default: float) -> tuple[float | None, str | None]:
-    if not raw:
-        return default, None
-
-    try:
-        value = float(raw)
-    except ValueError:
-        return None, "[ERROR] 숫자로 입력해 주세요."
-
-    if value <= 0:
-        return None, "[ERROR] 0보다 큰 값을 입력해 주세요."
-
-    return value, None
 
 
 def run_env_settings_input(key: str, value: str) -> tuple[str, str | None]:
@@ -86,7 +91,7 @@ def run_env_settings_input(key: str, value: str) -> tuple[str, str | None]:
         if status_message is not None:
             continue
 
-        return key, new_value
+        return key, normalize_env_setting_value(key, new_value)
 
 
 def run_env_settings_menu() -> str | None:
@@ -99,6 +104,18 @@ def run_env_settings_menu() -> str | None:
         if choice == "0":
             return status_message
 
+        if choice.lower() == "-":
+            status_message = "[WARNING] 환경설정을 초기화하시겠습니까? (y/n)"
+            items = get_env_settings_items()
+            confirm = prompt_env_reset_confirmation(items, status_message)
+            if confirm != "y":
+                status_message = "[INFO] 환경설정 초기화를 취소했습니다."
+                continue
+
+            reset_env_settings_to_defaults()
+            status_message = "[INFO] 환경설정을 초기값으로 되돌렸습니다."
+            continue
+
         status_message = validate_menu_number(choice, len(items))
         if status_message is not None:
             continue
@@ -110,7 +127,9 @@ def run_env_settings_menu() -> str | None:
             continue
 
         update_env_setting(key, new_value)
-        status_message = f"[INFO] {key} 값을 '{new_value}'로 변경했습니다."
+        display_value = format_env_setting_value(key, new_value)
+        log_runtime_event(f"env setting updated | key={key} | value={display_value}")
+        status_message = f"[INFO] {key} 값을 '{display_value}'로 변경했습니다."
 
 
 def run_settings_menu() -> str | None:
@@ -143,15 +162,15 @@ def prompt_for_missing_paths(config: TranslationConfig) -> TranslationConfig:
     runtime_settings = get_runtime_settings()
 
     if config.server_executable is None:
-        raw = input(f"llama-server 실행 파일 경로 (기본: {runtime_settings.llama_server_path}): ").strip().strip('"')
+        raw = prompt_missing_path("llama-server 실행 파일 경로", runtime_settings.llama_server_path)
         config.server_executable = Path(raw) if raw else None
 
     if config.model_path is None:
-        raw = input(f"GGUF 모델 파일 경로 (기본: {runtime_settings.llama_model_path}): ").strip().strip('"')
+        raw = prompt_missing_path("GGUF 모델 파일 경로", runtime_settings.llama_model_path)
         config.model_path = Path(raw) if raw else None
 
     if config.glossary_path is None:
-        raw = input(f"glossary.json 경로 (기본: {runtime_settings.glossary_path}): ").strip().strip('"')
+        raw = prompt_missing_path("glossary.json 경로", runtime_settings.glossary_path)
         config.glossary_path = Path(raw) if raw else runtime_settings.glossary_path
 
     return config

@@ -39,8 +39,10 @@ APP_ROOT = get_app_root()
 PROMPT_SETTINGS_PATH = APP_ROOT / "datas" / "prompt.json"
 DATA_DIR = APP_ROOT / "datas"
 LOG_FILE_NAME = "app.log"
+MAX_LOG_RUNS = 5
+LOG_RUN_MARKER = "=== NOVELTRANS RUN START ==="
 _LOGGING_INITIALIZED = False
-DEFAULT_MODEL_FILENAME = "gemma-4-26B-A4B-it-UD-Q4_K_M.gguf"
+DEFAULT_MODEL_FILENAME = "gemma-4-26B-A4B-it-UD-IQ4_NL.gguf"
 EDITABLE_ENV_KEYS = [
     "LLAMA_SERVER_PATH",
     "LLAMA_MODEL_PATH",
@@ -75,8 +77,8 @@ DEFAULT_ENV_VALUES = {
     "TOP_P": "0.9",
     "N_PREDICT": "1800",
     "CTX_SIZE": "8192",
-    "GPU_LAYERS": "",
-    "THREADS": "",
+    "GPU_LAYERS": "auto",
+    "THREADS": "auto",
     "STARTUP_TIMEOUT": "180",
 }
 DEFAULT_ENV_CONTENT = "\n".join(f"{key}={value}" for key, value in DEFAULT_ENV_VALUES.items()) + "\n"
@@ -188,11 +190,36 @@ def initialize_runtime_logging() -> None:
 
     log_path = get_log_path()
     try:
-        log_path.write_text("", encoding="utf-8")
+        _prune_old_log_runs(log_path)
+        with log_path.open("a", encoding="utf-8") as log_file:
+            separator = "\n" if log_path.stat().st_size > 0 else ""
+            log_file.write(f"{separator}{LOG_RUN_MARKER} {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
     except OSError:
         pass
 
     _LOGGING_INITIALIZED = True
+
+
+def _prune_old_log_runs(log_path: Path) -> None:
+    if not log_path.exists():
+        return
+
+    try:
+        text = log_path.read_text(encoding="utf-8")
+    except OSError:
+        return
+
+    if text.startswith("current_log="):
+        log_path.write_text("", encoding="utf-8")
+        return
+
+    run_starts = [index for index, line in enumerate(text.splitlines()) if line.startswith(LOG_RUN_MARKER)]
+    if len(run_starts) < MAX_LOG_RUNS:
+        return
+
+    lines = text.splitlines(keepends=True)
+    keep_start = run_starts[-(MAX_LOG_RUNS - 1)] if MAX_LOG_RUNS > 1 else len(lines)
+    log_path.write_text("".join(lines[keep_start:]), encoding="utf-8")
 
 
 def _warn_invalid_env(name: str, value: str, default: object) -> None:
@@ -343,6 +370,15 @@ def update_env_setting(key: str, value: str) -> None:
     if key not in EDITABLE_ENV_KEYS:
         raise ValueError(f"Unsupported env key: {key}")
     update_env_value(key, value.strip())
+
+
+def reset_env_settings_to_defaults(env_path: Path | None = None) -> Path:
+    resolved_env_path = env_path or (APP_ROOT / ".env")
+    resolved_env_path.write_text(DEFAULT_ENV_CONTENT, encoding="utf-8")
+    for key, value in DEFAULT_ENV_VALUES.items():
+        os.environ[key] = value
+    log_runtime_event(f"reset env settings to defaults | path={resolved_env_path}")
+    return resolved_env_path
 
 
 def _get_configured_path(key: str, env_path: Path | None = None) -> Path:

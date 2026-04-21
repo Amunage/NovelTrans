@@ -31,14 +31,13 @@ from app.setmodel import (
     run_command,
     write_runtime_metadata,
 )
-from app.ui import prompt_for_model_download, render_download_progress_screen
+from app.ui import prompt_for_model_download, prompt_llama_runtime_install, render_download_progress_screen
 MODEL_SETUP_METADATA = ".noveltrans-model.json"
 
 
 def ensure_runtime_setup() -> None:
     log_runtime_event(f"ensure_runtime_setup start | app_root={APP_ROOT}")
     ensure_default_project_files()
-    ensure_llama_cpp_runtime(APP_ROOT)
     log_runtime_event("ensure_runtime_setup done")
 
 
@@ -71,22 +70,26 @@ def run_model_download_setup(force_prompt: bool = True) -> str:
     return ensure_gemma_model_runtime(APP_ROOT, env_path, force_prompt=force_prompt)
 
 
-def ensure_llama_cpp_runtime(app_root: Path) -> None:
+def ensure_llama_cpp_runtime(app_root: Path, *, confirm_install: bool = False) -> str | None:
     if _is_truthy(os.environ.get("NOVELTRANS_SKIP_LLAMA_SETUP")):
-        return
+        return "[INFO] llama.cpp 런타임 자동 설치가 비활성화되어 있습니다."
 
     runtime_dir = app_root / "llama"
     server_path = runtime_dir / "llama-server.exe"
     log_runtime_event(f"ensure_llama_cpp_runtime check | runtime_dir={runtime_dir} | server_path={server_path}")
     if server_path.is_file():
         log_runtime_event("ensure_llama_cpp_runtime skipped | existing server found")
-        return
+        return None
+
+    if confirm_install and not prompt_llama_runtime_install(server_path):
+        log_runtime_event(f"llama runtime install declined | server_path={server_path}")
+        return "[INFO] llama.cpp 런타임 설치를 취소했습니다."
 
     if platform.system() != "Windows":
-        return
+        return "[WARN] Windows 환경이 아니어서 llama.cpp 런타임 자동 설치를 건너뜁니다."
 
     if platform.machine().lower() not in {"amd64", "x86_64"}:
-        return
+        return "[WARN] 지원하지 않는 CPU 아키텍처라 llama.cpp 런타임 자동 설치를 건너뜁니다."
 
     try:
         cuda_version = detect_cuda_version(run_command)
@@ -96,12 +99,15 @@ def ensure_llama_cpp_runtime(app_root: Path) -> None:
         installed_assets = ", ".join(str(asset["name"]) for asset in assets)
         print(f"[INFO] llama.cpp runtime installed: {installed_assets} -> {runtime_dir}")
         log_runtime_event(f"llama runtime installed | assets={installed_assets} | runtime_dir={runtime_dir}")
+        return f"[INFO] llama.cpp 런타임 설치 완료: {runtime_dir}"
     except DownloadCancelledError as exc:
         print(f"[INFO] llama.cpp runtime download cancelled: {exc.asset_name}")
         log_runtime_event(f"llama runtime download cancelled | asset={exc.asset_name}")
+        return f"[INFO] llama.cpp 런타임 다운로드를 취소했습니다: {exc.asset_name}"
     except Exception as exc:
         print(f"[WARN] llama.cpp runtime auto install skipped: {exc}")
         log_runtime_event(f"llama runtime auto install skipped | error={exc!r}")
+        return f"[WARN] llama.cpp 런타임 자동 설치를 건너뜁니다: {exc}"
 
 
 def ensure_gemma_model_runtime(app_root: Path, env_path: Path, *, force_prompt: bool = False) -> str:

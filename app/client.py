@@ -7,10 +7,11 @@ import socket
 import subprocess
 import threading
 import time
+import traceback
 from pathlib import Path
 from urllib import error, request
 
-from app.config import get_runtime_settings
+from app.config import get_runtime_settings, log_runtime_event
 from app.controller import prompt_for_missing_paths, prompt_for_source_files_with_ui
 from app.refiner import refine_document
 from app.translation import (
@@ -34,6 +35,7 @@ class LlamaCppServerClient:
         self.timeout = max(1, timeout)
 
     def wait_until_ready(self, startup_timeout: int, progress_callback=None) -> None:
+        log_runtime_event(f"llama health wait start | url={self.health_url} | timeout={startup_timeout}")
         start_time = time.time()
         deadline = start_time + startup_timeout
         while time.time() < deadline:
@@ -44,9 +46,15 @@ class LlamaCppServerClient:
                 req = request.Request(self.health_url, method="GET")
                 with request.urlopen(req, timeout=5) as response:
                     if 200 <= response.status < 500:
+                        log_runtime_event(
+                            f"llama health ready | url={self.health_url} | status={response.status} | "
+                            f"elapsed={int(time.time() - start_time)}"
+                        )
                         return
-            except Exception:
+            except Exception as exc:
+                log_runtime_event(f"llama health check failed | url={self.health_url} | error={exc!r}")
                 time.sleep(1.0)
+        log_runtime_event(f"llama health wait timeout | url={self.health_url} | timeout={startup_timeout}")
         raise RuntimeError("llama-server did not become ready within the startup timeout")
 
     def _sanitize_prompt(self, text: str) -> str:
@@ -87,6 +95,10 @@ class LlamaCppServerClient:
         wait_callback=None,
     ) -> str:
         payload = self._build_payload(prompt, temperature=temperature, top_p=top_p, n_predict=n_predict)
+        log_runtime_event(
+            f"llama translate request start | url={self.chat_completion_url} | "
+            f"prompt_chars={len(prompt)} | n_predict={n_predict} | temperature={temperature}"
+        )
 
         def send(payload_to_send: dict) -> str:
             body = json.dumps(payload_to_send, ensure_ascii=False).encode("utf-8")
@@ -126,6 +138,9 @@ class LlamaCppServerClient:
             response_body = send_with_wait(payload)
         except error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
+            log_runtime_event(
+                f"llama translate http error | url={self.chat_completion_url} | code={exc.code} | detail={detail[:500]!r}"
+            )
             if exc.code == 500 and ("<|channel>" in detail or "<channel|>" in detail or "Failed to parse input" in detail):
                 retry_payload = self._build_payload(
                     self._sanitize_prompt(prompt).replace("<|channel>", "").replace("<channel|>", ""),
@@ -137,19 +152,27 @@ class LlamaCppServerClient:
                     response_body = send_with_wait(retry_payload)
                 except error.HTTPError as retry_exc:
                     retry_detail = retry_exc.read().decode("utf-8", errors="replace")
+                    log_runtime_event(
+                        f"llama translate retry http error | url={self.chat_completion_url} | "
+                        f"code={retry_exc.code} | detail={retry_detail[:500]!r}"
+                    )
                     raise RuntimeError(f"llama-server returned HTTP {retry_exc.code}: {retry_detail}") from retry_exc
                 except (TimeoutError, socket.timeout) as retry_exc:
+                    log_runtime_event(f"llama translate retry timeout | timeout={self.timeout} | error={retry_exc!r}")
                     raise RuntimeError(
                         f"llama-server request timed out after {self.timeout} seconds during retry"
                     ) from retry_exc
             else:
                 raise RuntimeError(f"llama-server returned HTTP {exc.code}: {detail}") from exc
         except (TimeoutError, socket.timeout) as exc:
+            log_runtime_event(f"llama translate timeout | timeout={self.timeout} | error={exc!r}")
             raise RuntimeError(f"llama-server request timed out after {self.timeout} seconds") from exc
         except error.URLError as exc:
             reason = exc.reason
             if isinstance(reason, TimeoutError | socket.timeout):
+                log_runtime_event(f"llama translate connect timeout | timeout={self.timeout} | error={exc!r}")
                 raise RuntimeError(f"Failed to connect to llama-server within {self.timeout} seconds") from exc
+            log_runtime_event(f"llama translate connect failed | error={exc!r}")
             raise RuntimeError(f"Failed to connect to llama-server: {exc.reason}") from exc
 
         data = json.loads(response_body)
@@ -157,7 +180,11 @@ class LlamaCppServerClient:
         message = choices[0].get("message", {}) if choices else {}
         content = message.get("content", "")
         if not isinstance(content, str) or not content.strip():
+            log_runtime_event(f"llama translate empty response | response={data!r}")
             raise RuntimeError(f"Empty translation response: {data}")
+        log_runtime_event(
+            f"llama translate request complete | url={self.chat_completion_url} | response_chars={len(content)}"
+        )
         return content.strip()
 
 
@@ -183,6 +210,10 @@ def start_llama_server(config: TranslationConfig) -> subprocess.Popen:
     if config.threads is not None:
         command.extend(["-t", str(config.threads)])
 
+    log_runtime_event(
+        f"llama server start | executable={config.server_executable} | model={config.model_path} | "
+        f"url={config.server_url} | ctx={config.context_size} | gpu_layers={config.gpu_layers} | threads={config.threads}"
+    )
     return subprocess.Popen(
         command,
         stdout=subprocess.DEVNULL,
@@ -198,9 +229,11 @@ def stop_llama_server(process: subprocess.Popen | None) -> None:
     process.terminate()
     try:
         process.wait(timeout=10)
+        log_runtime_event("llama server stopped")
     except subprocess.TimeoutExpired:
         process.kill()
         process.wait(timeout=5)
+        log_runtime_event("llama server killed after stop timeout")
 
 
 def extract_port(server_url: str) -> int:
@@ -266,6 +299,7 @@ def main() -> int:
 
     try:
         config = parse_args()
+        log_runtime_event("translation main start")
         runtime_settings = get_runtime_settings()
         selected_source_files = (
             [config.source_file]
@@ -274,6 +308,7 @@ def main() -> int:
         )
         config = prompt_for_missing_paths(config)
         if not selected_source_files:
+            log_runtime_event("translation main cancelled | reason=no_source_files")
             return 0
 
         translation_started_at = time.monotonic()
@@ -310,6 +345,7 @@ def main() -> int:
 
         last_output_path: Path | None = None
         for index, source_file in enumerate(selected_source_files, start=1):
+            log_runtime_event(f"translation file start | index={index}/{len(selected_source_files)} | source={source_file}")
             config.source_file = source_file
             validate_paths(config)
 
@@ -354,6 +390,7 @@ def main() -> int:
             else:
                 progress_callback("다듬기 생략", 1, 1, "[INFO] 다듬기가 꺼져 있어 초벌 번역을 최종 결과로 저장합니다.")
                 atomic_write_text(output_path, build_translated_document(translated_title, translated_chunks))
+            log_runtime_event(f"translation file complete | source={source_file} | output={output_path}")
 
         stop_llama_server(server_process)
         server_process = None
@@ -366,11 +403,14 @@ def main() -> int:
             status_message="[INFO] 모든 번역 파일 처리가 완료되었습니다.",
         )
         input("")
+        log_runtime_event(f"translation main complete | files={len(selected_source_files)}")
         return 0
     except KeyboardInterrupt:
+        log_runtime_event("translation cancelled by user")
         print("\n[INFO] 사용자가 작업을 중단했습니다.")
         return 130
     except Exception as exc:
+        log_runtime_event(f"translation main failed | error={exc!r}\n{traceback.format_exc()}")
         print(f"[ERROR] {exc}")
         return 1
     finally:

@@ -34,8 +34,8 @@ KANJI_PATTERN = re.compile(r"[\u4e00-\u9faf]")
 KATAKANA_PATTERN = re.compile(r"[\u30a1-\u30f4]")
 SENTENCE_SPLIT_PATTERN = re.compile(r"(?<=[\u3002\uff01\uff1f!?])\s+|\n+")
 
-MIN_TERM_COUNT = 2
-MIN_FILE_COUNT = 2
+MIN_TERM_COUNT = 5
+MIN_FILE_COUNT = 3
 MAX_CANDIDATES = 300
 GLOSSARY_BATCH_SIZE = 30
 MIN_SENTENCE_LENGTH = 12
@@ -53,6 +53,9 @@ NAME_SUFFIXES = (
     "氏",
     "選手",
     "トレーナー",
+)
+NAME_SUFFIX_PATTERN = re.compile(
+    rf"[{TERM_CHAR_CLASS}]{{2,}}(?:\s+)?(?:{'|'.join(re.escape(suffix) for suffix in sorted(NAME_SUFFIXES, key=len, reverse=True))})"
 )
 NAME_LIKE_SUFFIXES = (
     "子",
@@ -127,6 +130,20 @@ def _is_mixed_kanji_katakana(term: str) -> bool:
     return _has_kanji(term) and _has_katakana(term)
 
 
+def _has_name_suffix(term: str) -> bool:
+    compact_term = term.replace(" ", "")
+    for suffix in NAME_SUFFIXES:
+        if compact_term.endswith(suffix):
+            stem = compact_term[: -len(suffix)]
+            return KANJI_OR_KATAKANA_PATTERN.search(stem) is not None
+    return False
+
+
+def _iter_term_matches(text: str) -> Iterable[re.Match[str]]:
+    yield from TERM_PATTERN.finditer(text)
+    yield from NAME_SUFFIX_PATTERN.finditer(text)
+
+
 def _is_valid_term(term: str) -> bool:
     if len(term) < 2:
         return False
@@ -186,6 +203,8 @@ def _is_embedded_kanji_stem(text: str, start: int, end: int, term: str) -> bool:
 
 def _has_name_pattern(term: str) -> bool:
     compact_term = term.replace(" ", "")
+    if _has_name_suffix(term):
+        return True
     if _is_mixed_kanji_katakana(term):
         return (" " in term) or ("・" in term)
     if KATAKANA_ONLY_PATTERN.fullmatch(term):
@@ -235,7 +254,7 @@ def _has_honorific_context(term: str, sentences: list[str]) -> bool:
 def _has_cooccurring_proper_noun(term: str, sentences: list[str]) -> bool:
     for sentence in sentences:
         found_terms: set[str] = set()
-        for match in TERM_PATTERN.finditer(sentence):
+        for match in _iter_term_matches(sentence):
             candidate = _normalize_term(match.group(0))
             if candidate == term or not _is_valid_term(candidate):
                 continue
@@ -429,7 +448,7 @@ def _build_glossary_model_config() -> TranslationConfig:
     )
 
 
-def refine_glossary_candidates(novel_dir: Path, candidates: dict[str, str], started_at: float) -> dict[str, str]:
+def refine_glossary_candidates(novel_dir: Path, candidates: dict[str, str]) -> dict[str, str]:
     if not candidates:
         return {}
 
@@ -473,10 +492,11 @@ def refine_glossary_candidates(novel_dir: Path, candidates: dict[str, str], star
                 n_predict=min(config.n_predict, 1536),
             )
             parsed = _extract_json_object(response)
-            allowed_terms = {term for term, _ in batch}
-            accepted.update({term: value for term, value in parsed.items() if term in allowed_terms})
+            for term, _ in batch:
+                if term in parsed:
+                    accepted[term] = parsed[term]
 
-        return dict(sorted(accepted.items(), key=lambda item: len(item[0]), reverse=True))
+        return accepted
     finally:
         stop_llama_server(server_process)
 
@@ -484,13 +504,15 @@ def refine_glossary_candidates(novel_dir: Path, candidates: dict[str, str], star
 def save_final_glossary(novel_dir: Path, glossary: dict[str, str]) -> Path:
     output_path = APP_ROOT / "glossary" / f"{novel_dir.name}.json"
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    merged_glossary = _load_existing_glossary(output_path)
+    existing_glossary = _load_existing_glossary(output_path)
+    merged_glossary: dict[str, str] = {}
     for source, target in glossary.items():
+        merged_glossary[source] = existing_glossary.get(source, target)
+    for source, target in existing_glossary.items():
         if source not in merged_glossary:
             merged_glossary[source] = target
 
-    sorted_glossary = dict(sorted(merged_glossary.items(), key=lambda item: len(item[0]), reverse=True))
-    output_path.write_text(json.dumps(sorted_glossary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    output_path.write_text(json.dumps(merged_glossary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return output_path
 
 
@@ -506,7 +528,7 @@ def extract_glossary_candidates(novel_dir: Path) -> dict[str, str]:
         sentences = _split_sentences(chapter_text)
         seen_terms_in_file: set[str] = set()
 
-        for match in TERM_PATTERN.finditer(chapter_text):
+        for match in _iter_term_matches(chapter_text):
             term = _normalize_term(match.group(0))
             if not _is_valid_term(term):
                 continue
@@ -520,7 +542,7 @@ def extract_glossary_candidates(novel_dir: Path) -> dict[str, str]:
 
         for sentence in sentences:
             found_terms: set[str] = set()
-            for match in TERM_PATTERN.finditer(sentence):
+            for match in _iter_term_matches(sentence):
                 term = _normalize_term(match.group(0))
                 if not _is_valid_term(term):
                     continue
@@ -531,8 +553,8 @@ def extract_glossary_candidates(novel_dir: Path) -> dict[str, str]:
             for term in found_terms:
                 sentences_by_term[term].append(sentence)
 
-    candidates: dict[str, str] = {}
-    for term, count in term_counts.most_common():
+    scored_candidates: list[tuple[str, str, float, int]] = []
+    for source_order, (term, count) in enumerate(term_counts.most_common()):
         if count < MIN_TERM_COUNT:
             continue
         if file_counts[term] < MIN_FILE_COUNT:
@@ -543,11 +565,10 @@ def extract_glossary_candidates(novel_dir: Path) -> dict[str, str]:
         term_score = _score_term(term, count, file_counts[term], sentences)
         if term_score < MIN_TERM_SCORE:
             continue
-        candidates[term] = _choose_example_sentence(term, sentences)
-        if len(candidates) >= MAX_CANDIDATES:
-            break
+        scored_candidates.append((term, _choose_example_sentence(term, sentences), term_score, source_order))
 
-    return candidates
+    scored_candidates.sort(key=lambda item: (-item[2], item[3]))
+    return {term: example for term, example, _, _ in scored_candidates[:MAX_CANDIDATES]}
 
 
 def main() -> int:
@@ -585,7 +606,7 @@ def main() -> int:
         render_glossary_candidate_progress_screen("후보 추출 중...")
         candidates = extract_glossary_candidates(novel_dir)
         glossary_started_at = time.monotonic()
-        glossary = refine_glossary_candidates(novel_dir, candidates, glossary_started_at)
+        glossary = refine_glossary_candidates(novel_dir, candidates)
         output_path = save_final_glossary(novel_dir, glossary)
         log_runtime_event(
             f"glossary candidate generation complete | novel_dir={novel_dir} | "
