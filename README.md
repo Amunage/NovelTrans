@@ -21,8 +21,9 @@
 
 ### 1. 실행 파일 배포본 사용
 
-1. `dist/noveltrans.exe`를 원하는 폴더에 둡니다.
-2. 실행하면 같은 폴더에 아래 항목이 자동 생성되거나 다운로드됩니다.
+1. `dist/NovelTrans.exe`를 원하는 폴더에 둡니다.
+   - 내부 실행 파일은 `dist/runtime/app.exe`이지만 `dist/NovelTrans.exe`만 실행하면 됩니다.
+2. 실행하면 같은 폴더의 `data/` 아래에 아래 항목이 자동 생성되거나 다운로드됩니다.
    - `.env`
    - `glossary/glossary.json`
    - `llama/`
@@ -34,12 +35,13 @@
 
 ### 2. 원문 파일 배치
 
-기본 원문 폴더는 `source/`입니다.
+기본 원문 폴더는 `data/source/`입니다.
 
 폴더 구조 예시:
 
 ```text
-source/
+data/
+  source/
   작품이름/
     0001.txt
     0002.txt
@@ -51,12 +53,13 @@ source/
 
 ### 3. 번역 결과 위치
 
-기본 출력 폴더는 `translated/`입니다.
+기본 출력 폴더는 `data/translated/`입니다.
 
 예시:
 
 ```text
-translated/
+data/
+  translated/
   작품이름/
     0001_ko.txt
     0002_ko.txt
@@ -91,10 +94,10 @@ translated/
 가상환경이 준비된 상태에서 아래 배치 파일로 빌드합니다.
 
 ```bat
-build.bat
+.build.bat
 ```
 
-빌드가 끝나면 `dist/noveltrans.exe`가 생성됩니다.
+빌드가 끝나면 `dist/NovelTrans.exe`와 `dist/runtime/app.exe`가 생성됩니다.
 
 ## 트러블슈팅
 
@@ -102,16 +105,16 @@ build.bat
 
 - 모델 다운로드가 완료되지 않았거나 `LLAMA_MODEL_PATH`가 잘못된 경우입니다.
 - `[9] 설정 -> [2] 모델 다운로드`를 다시 실행해 보세요.
-- 또는 `.env`의 `LLAMA_MODEL_PATH`가 실제 파일을 가리키는지 확인하세요.
+- 또는 `data/.env`의 `LLAMA_MODEL_PATH`가 실제 파일을 가리키는지 확인하세요.
 
 ### `[ERROR] 원문 폴더가 없습니다. 설정을 확인해주세요.`
 
 - `SOURCE_PATH`가 존재하지 않거나 폴더가 아닌 경우입니다.
-- 기본값은 `source`입니다.
+- 기본값은 `data/source`입니다.
 
 ### `[ERROR] 번역할 원문 txt 파일이 없습니다.`
 
-- `source/작품명/0001.txt` 같은 형식의 파일이 필요합니다.
+- `data/source/작품명/0001.txt` 같은 형식의 파일이 필요합니다.
 - 작품 폴더만 있고 챕터 txt가 없으면 번역 메뉴로 진입하지 못합니다.
 
 ### 첫 실행에서 런타임 또는 모델 다운로드가 실패합니다.
@@ -119,7 +122,7 @@ build.bat
 - 인터넷 연결 상태를 확인하세요.
 - 보안 프로그램이 다운로드 파일 생성이나 압축 해제를 막지 않는지 확인하세요.
 - 앱 폴더에 쓰기 권한이 있는 위치에서 실행하세요.
-- 문제가 생기면 실행 폴더의 `app.log`를 확인하세요.
+- 문제가 생기면 `data/app_log.log`를 확인하세요.
 
 ### Windows Smart App Control 때문에 실행이 막힙니다.
 
@@ -141,5 +144,5 @@ build.bat
 
 ## 로그
 
-- 로그 파일은 실행 폴더의 `app.log`에 생성됩니다.
+- 로그 파일은 `data/app_log.log`에 생성됩니다.
 - 프로그램을 새로 실행할 때마다 로그는 초기화됩니다.
