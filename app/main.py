@@ -95,7 +95,7 @@ def main() -> int:
     except KeyboardInterrupt:
         log_runtime_event("main cancelled by user")
         os.system("cls")
-        print("\n[INFO] 사용자가 작업을 중단했습니다.")
+        print("[INFO] 사용자가 작업을 중단했습니다.")
         return 130
     except Exception as exc:
         log_runtime_event(f"main unhandled error | error={exc!r}\n{traceback.format_exc()}")
