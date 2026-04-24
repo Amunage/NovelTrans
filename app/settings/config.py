@@ -40,8 +40,6 @@ def get_app_root() -> Path:
 
 
 def get_distribution_root(app_root: Path) -> Path:
-    if getattr(sys, "frozen", False) and app_root.name.lower() == "runtime":
-        return app_root.parent
     return app_root
 
 
@@ -99,12 +97,21 @@ def _get_str(name: str, default: str) -> str:
     return os.getenv(name, default)
 
 
+ROOT_RELATIVE_PATH_KEYS = {"SOURCE_PATH", "OUTPUT_ROOT"}
+
+
+def _get_relative_path_base(name: str) -> Path:
+    if name in ROOT_RELATIVE_PATH_KEYS:
+        return DIST_ROOT
+    return DATA_ROOT
+
+
 def _get_path(name: str, default: str) -> Path:
     raw_value = _get_str(name, default)
     path = Path(raw_value)
     if path.is_absolute():
         return path
-    return DATA_ROOT / path
+    return _get_relative_path_base(name) / path
 
 
 def _get_int(name: str, default: int) -> int:
@@ -250,7 +257,7 @@ def _get_configured_path(key: str, env_path: Path | None = None) -> Path:
     resolved_path = Path(raw_path)
     if resolved_path.is_absolute():
         return resolved_path
-    return DATA_ROOT / resolved_path
+    return _get_relative_path_base(key) / resolved_path
 
 
 def get_configured_model_path(env_path: Path | None = None) -> Path:

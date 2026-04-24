@@ -21,8 +21,9 @@
 
 ### 1. 실행 파일 배포본 사용
 
-1. `dist/NovelTrans.exe`를 원하는 폴더에 둡니다.
-   - 내부 실행 파일은 `dist/runtime/app.exe`이지만 `dist/NovelTrans.exe`만 실행하면 됩니다.
+1. `dist/NovelTrans/` 폴더를 원하는 위치에 둡니다.
+   - 앱 실행 파일은 `dist/NovelTrans/NovelTrans.exe`입니다.
+   - PyInstaller 내부 파일은 `dist/NovelTrans/_internal/`에 들어갑니다.
 2. 실행하면 같은 폴더의 `data/` 아래에 아래 항목이 자동 생성되거나 다운로드됩니다.
    - `.env`
    - `glossary/glossary.json`
@@ -35,13 +36,12 @@
 
 ### 2. 원문 파일 배치
 
-기본 원문 폴더는 `data/source/`입니다.
+기본 원문 폴더는 `source/`입니다.
 
 폴더 구조 예시:
 
 ```text
-data/
-  source/
+source/
   작품이름/
     0001.txt
     0002.txt
@@ -53,13 +53,12 @@ data/
 
 ### 3. 번역 결과 위치
 
-기본 출력 폴더는 `data/translated/`입니다.
+기본 출력 폴더는 `translated/`입니다.
 
 예시:
 
 ```text
-data/
-  translated/
+translated/
   작품이름/
     0001_ko.txt
     0002_ko.txt
@@ -97,7 +96,7 @@ data/
 .build.bat
 ```
 
-빌드가 끝나면 `dist/NovelTrans.exe`와 `dist/runtime/app.exe`가 생성됩니다.
+빌드가 끝나면 `dist/NovelTrans/NovelTrans.exe`와 `dist/NovelTrans/_internal/`이 생성됩니다.
 
 ## 트러블슈팅
 
@@ -110,11 +109,11 @@ data/
 ### `[ERROR] 원문 폴더가 없습니다. 설정을 확인해주세요.`
 
 - `SOURCE_PATH`가 존재하지 않거나 폴더가 아닌 경우입니다.
-- 기본값은 `data/source`입니다.
+- 기본값은 `source`입니다.
 
 ### `[ERROR] 번역할 원문 txt 파일이 없습니다.`
 
-- `data/source/작품명/0001.txt` 같은 형식의 파일이 필요합니다.
+- `source/작품명/0001.txt` 같은 형식의 파일이 필요합니다.
 - 작품 폴더만 있고 챕터 txt가 없으면 번역 메뉴로 진입하지 못합니다.
 
 ### 첫 실행에서 런타임 또는 모델 다운로드가 실패합니다.

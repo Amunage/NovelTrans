@@ -5,6 +5,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from app.terms.base import GlossaryLanguageSupport, _choose_example_sentence, _normalize_sentence, _split_sentences
+from app.terms.dictionary import has_dictionary_word
 from app.utils import find_chapter_files, parse_source_file
 
 
@@ -13,6 +14,7 @@ MIN_TERM_COUNT = 5
 MIN_FILE_COUNT = 3
 MAX_CANDIDATES = 300
 MIN_TERM_SCORE = 4.0
+CHINESE_DICT_FILENAME = "chinese_dict.txt"
 STOP_TERMS = {
     "这个",
     "那个",
@@ -119,6 +121,13 @@ def _has_org_suffix(term: str) -> bool:
 
 def _has_location_suffix(term: str) -> bool:
     return any(term.endswith(suffix) and len(term) > len(suffix) for suffix in LOCATION_SUFFIXES)
+
+
+def _is_dictionary_word(term: str) -> bool:
+    compact = term.replace("·", "").replace("・", "")
+    if len(compact) < 2:
+        return False
+    return has_dictionary_word(CHINESE_DICT_FILENAME, compact)
 
 
 def _is_valid_term(term: str) -> bool:
@@ -233,6 +242,14 @@ def extract_glossary_candidates(novel_dir: Path) -> dict[str, str]:
         if count < MIN_TERM_COUNT or file_counts[term] < MIN_FILE_COUNT:
             continue
         sentences = sentences_by_term.get(term, [])
+        if (
+            _is_dictionary_word(term)
+            and not _has_name_suffix(term)
+            and not _has_org_suffix(term)
+            and not _has_location_suffix(term)
+            and not _has_honorific_context(term, sentences)
+        ):
+            continue
         term_score = _score_term(term, count, file_counts[term], sentences)
         if term_score < MIN_TERM_SCORE:
             continue

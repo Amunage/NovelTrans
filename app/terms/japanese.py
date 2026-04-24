@@ -3,14 +3,10 @@ from __future__ import annotations
 import re
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Any, Iterable
-
-try:
-    from janome.tokenizer import Tokenizer
-except ImportError:  # pragma: no cover - optional dependency during local edits
-    Tokenizer = None
+from typing import Iterable
 
 from app.terms.base import GlossaryLanguageSupport, _choose_example_sentence, _normalize_sentence, _split_sentences
+from app.terms.dictionary import has_dictionary_word
 from app.utils import find_chapter_files, parse_source_file
 
 
@@ -26,6 +22,7 @@ MIN_TERM_COUNT = 5
 MIN_FILE_COUNT = 3
 MAX_CANDIDATES = 300
 MIN_TERM_SCORE = 4.0
+JAPANESE_DICT_FILENAME = "japanese_dict.txt"
 NAME_SUFFIXES = (
     "さん",
     "君",
@@ -54,7 +51,6 @@ NAME_LIKE_SUFFIXES = (
     "男",
     "郎",
 )
-_TOKENIZER: Any = None
 GLOSSARY_SYSTEM_INSTRUCTIONS = [
     "You are reviewing Japanese glossary candidates for a Korean novel translation glossary.",
     "Keep only real proper nouns, person names, place names, organizations, schools, techniques, titles, item names, and fixed story-specific terms.",
@@ -64,26 +60,6 @@ GLOSSARY_SYSTEM_INSTRUCTIONS = [
     "Values must be concise, natural Korean glossary entries.",
     "Do not include explanations or markdown.",
 ]
-
-
-def _get_tokenizer() -> Any | None:
-    global _TOKENIZER
-
-    if _TOKENIZER is False:
-        return None
-    if _TOKENIZER is not None:
-        return _TOKENIZER
-    if Tokenizer is None:
-        _TOKENIZER = False
-        return None
-
-    try:
-        _TOKENIZER = Tokenizer()
-    except Exception:
-        _TOKENIZER = False
-        return None
-    return _TOKENIZER
-
 
 def _normalize_term(term: str) -> str:
     normalized = term.strip("・")
@@ -190,28 +166,10 @@ def _is_embedded_kanji_stem(text: str, start: int, end: int, term: str) -> bool:
 
 
 def _is_dictionary_word(term: str) -> bool:
-    tokenizer = _get_tokenizer()
-    if tokenizer is None:
-        return False
-
     compact_term = term.replace(" ", "").replace("・", "")
     if len(compact_term) < 2:
         return False
-
-    tokens = list(tokenizer.tokenize(compact_term))
-    if len(tokens) != 1:
-        return False
-
-    token = tokens[0]
-    surface = getattr(token, "surface", "")
-    if surface != compact_term:
-        return False
-
-    base_form = getattr(token, "base_form", "") or ""
-    if base_form in {"", "*"}:
-        return False
-
-    return True
+    return has_dictionary_word(JAPANESE_DICT_FILENAME, compact_term)
 
 
 def _has_honorific_context(term: str, sentences: list[str]) -> bool:

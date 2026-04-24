@@ -69,6 +69,8 @@ def ensure_default_project_files() -> None:
 
     (DATA_ROOT / "llama").mkdir(parents=True, exist_ok=True)
     (DATA_ROOT / "models").mkdir(parents=True, exist_ok=True)
+    (APP_ROOT / "source").mkdir(parents=True, exist_ok=True)
+    (APP_ROOT / "translated").mkdir(parents=True, exist_ok=True)
     log_runtime_event(f"ensured runtime dirs | llama={DATA_ROOT / 'llama'} | models={DATA_ROOT / 'models'}")
 
     glossary_dir = DATA_ROOT / "glossary"

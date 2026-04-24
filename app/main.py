@@ -15,6 +15,7 @@ from app.settings.config import (
 )
 from app.settings.logging import get_log_path, log_runtime_event
 from app.settings.precheck import get_glossary_candidate_block_reason, get_translation_block_reason
+from app.settings.update import get_startup_update_status
 from app.extract.crawler import main as crawler_main
 from app.settings.setup import ensure_llama_cpp_runtime, ensure_runtime_setup
 from app.terms.entrypoint import main as glossary_main
@@ -28,7 +29,7 @@ def main() -> int:
     try:
         log_runtime_event(f"main start | log_path={get_log_path()}")
         ensure_runtime_setup()
-        status_message = None
+        status_message = get_startup_update_status()
 
         while True:
             choice = prompt_main_menu(status_message)
@@ -76,6 +77,8 @@ def main() -> int:
 
             if choice == "4":
                 status_message = run_settings_menu()
+                if status_message == "__UPDATE_EXIT__":
+                    return 0
                 continue
 
             if choice == "5":

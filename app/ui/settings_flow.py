@@ -174,6 +174,15 @@ def run_settings_menu() -> str | None:
                 status_message = f"[ERROR] 모델 다운로드 중 오류가 발생했습니다: {exc}"
             continue
 
+        if choice == "3":
+            render_settings_menu("[INFO] 업데이트를 확인하는 중입니다...")
+            from app.settings.update import run_update_flow
+
+            status_message, should_exit = run_update_flow()
+            if should_exit:
+                return "__UPDATE_EXIT__"
+            continue
+
         status_message = "[ERROR] 잘못된 입력입니다."
 
 
