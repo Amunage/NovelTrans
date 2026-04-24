@@ -64,6 +64,14 @@ def _repair_status(existed_before: bool) -> str:
     return "PASS" if existed_before else "REPAIRED"
 
 
+def _precheck_status(reason: str) -> str:
+    initial_state_warnings = {
+        "[ERROR] 번역할 원문 txt 파일이 없습니다.",
+        "[ERROR] 용어 후보를 탐색할 원문 txt 파일이 없습니다.",
+    }
+    return "WARN" if reason in initial_state_warnings else "FAIL"
+
+
 def _check_runtime_files() -> list[DiagnosticResult]:
     results: list[DiagnosticResult] = []
     expected_paths = {
@@ -246,13 +254,13 @@ def _check_feature_prerequisites() -> list[DiagnosticResult]:
     if translation_reason is None:
         results.append(_result("translation precheck", "PASS", "ready to run translation"))
     else:
-        results.append(_result("translation precheck", "FAIL", translation_reason))
+        results.append(_result("translation precheck", _precheck_status(translation_reason), translation_reason))
 
     glossary_reason = get_glossary_candidate_block_reason()
     if glossary_reason is None:
         results.append(_result("glossary precheck", "PASS", "ready to build glossary candidates"))
     else:
-        results.append(_result("glossary precheck", "FAIL", glossary_reason))
+        results.append(_result("glossary precheck", _precheck_status(glossary_reason), glossary_reason))
 
     return results
 

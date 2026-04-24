@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import urllib.request
@@ -51,6 +52,10 @@ def get_current_version() -> str:
 
 def get_startup_update_status() -> str:
     current_version = get_current_version()
+    rollback_error_log = _get_update_error_log_path()
+    if rollback_error_log.exists():
+        return f"[WARN] 업데이트 설치에 실패하여 이전 버전으로 롤백했습니다. 현재 버전: {current_version}"
+
     try:
         release = check_for_update()
     except UpdateNotConfiguredError as exc:
@@ -64,6 +69,25 @@ def get_startup_update_status() -> str:
         return f"[INFO] 최신 버전입니다. 현재 버전: {current_version}"
 
     return f"[INFO] 새 버전이 있습니다: {current_version} -> {release.tag_name}. 설정 메뉴에서 업데이트할 수 있습니다."
+
+
+def clear_staged_update_files() -> None:
+    update_dir = DATA_ROOT / UPDATE_DIR_NAME
+    if not update_dir.exists():
+        return
+
+    for child in update_dir.iterdir():
+        try:
+            if child.is_dir() and not child.is_symlink():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
+        except OSError as exc:
+            log_runtime_event(f"update cleanup skipped | path={child} | error={exc!r}")
+
+
+def _get_update_error_log_path() -> Path:
+    return DATA_ROOT / UPDATE_DIR_NAME / "update_error.log"
 
 
 def check_for_update() -> UpdateRelease | None:
@@ -281,6 +305,27 @@ $zipFile = Resolve-Path -LiteralPath $ZipPath
 $updateRoot = Split-Path -Parent $zipFile
 $extractDir = Join-Path $updateRoot "extracted"
 $backupDir = Join-Path $updateRoot ("backup-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
+$currentExe = Join-Path $appRootPath $ExeName
+$currentInternal = Join-Path $appRootPath "_internal"
+$targetData = Join-Path $appRootPath "data"
+$targetDict = Join-Path $targetData "dict"
+$backupExe = Join-Path $backupDir $ExeName
+$backupInternal = Join-Path $backupDir "_internal"
+$backupData = Join-Path $backupDir "data"
+$backupDict = Join-Path $backupData "dict"
+
+function Restore-Path([string]$BackupPath, [string]$DestinationPath) {
+    if (-not (Test-Path -LiteralPath $BackupPath)) {
+        return
+    }
+
+    Remove-Item -LiteralPath $DestinationPath -Recurse -Force -ErrorAction SilentlyContinue
+    $destinationParent = Split-Path -Parent $DestinationPath
+    if ($destinationParent) {
+        New-Item -ItemType Directory -Path $destinationParent -Force | Out-Null
+    }
+    Move-Item -LiteralPath $BackupPath -Destination $DestinationPath -Force
+}
 
 function Find-PayloadRoot([string]$Root) {
     $directExe = Join-Path $Root $ExeName
@@ -310,21 +355,21 @@ try {
     $payloadRoot = Find-PayloadRoot $extractDir
 
     New-Item -ItemType Directory -Path $backupDir | Out-Null
-    $currentExe = Join-Path $appRootPath $ExeName
-    $currentInternal = Join-Path $appRootPath "_internal"
     if (Test-Path -LiteralPath $currentExe) {
         Move-Item -LiteralPath $currentExe -Destination $backupDir -Force
     }
     if (Test-Path -LiteralPath $currentInternal) {
         Move-Item -LiteralPath $currentInternal -Destination $backupDir -Force
     }
+    if (Test-Path -LiteralPath $targetDict) {
+        New-Item -ItemType Directory -Path $backupData -Force | Out-Null
+        Move-Item -LiteralPath $targetDict -Destination $backupData -Force
+    }
 
     Copy-Item -LiteralPath (Join-Path $payloadRoot $ExeName) -Destination $appRootPath -Force
     Copy-Item -LiteralPath (Join-Path $payloadRoot "_internal") -Destination $appRootPath -Recurse -Force
     $payloadDict = Join-Path $payloadRoot "data\dict"
     if (Test-Path -LiteralPath $payloadDict) {
-        $targetData = Join-Path $appRootPath "data"
-        $targetDict = Join-Path $targetData "dict"
         New-Item -ItemType Directory -Path $targetData -Force | Out-Null
         Remove-Item -LiteralPath $targetDict -Recurse -Force -ErrorAction SilentlyContinue
         Copy-Item -LiteralPath $payloadDict -Destination $targetData -Recurse -Force
@@ -332,13 +377,12 @@ try {
 
     Start-Process -FilePath (Join-Path $appRootPath $ExeName) -WorkingDirectory $appRootPath
 } catch {
-    $failedBackupExe = Join-Path $backupDir $ExeName
-    $failedBackupInternal = Join-Path $backupDir "_internal"
-    if ((Test-Path -LiteralPath $failedBackupExe) -and -not (Test-Path -LiteralPath (Join-Path $appRootPath $ExeName))) {
-        Move-Item -LiteralPath $failedBackupExe -Destination $appRootPath -Force
-    }
-    if ((Test-Path -LiteralPath $failedBackupInternal) -and -not (Test-Path -LiteralPath (Join-Path $appRootPath "_internal"))) {
-        Move-Item -LiteralPath $failedBackupInternal -Destination $appRootPath -Force
+    Restore-Path $backupExe $currentExe
+    Restore-Path $backupInternal $currentInternal
+    if (Test-Path -LiteralPath $backupDict) {
+        Restore-Path $backupDict $targetDict
+    } else {
+        Remove-Item -LiteralPath $targetDict -Recurse -Force -ErrorAction SilentlyContinue
     }
     Add-Content -LiteralPath (Join-Path $updateRoot "update_error.log") -Value $_.Exception.ToString()
     Start-Process -FilePath (Join-Path $appRootPath $ExeName) -WorkingDirectory $appRootPath
@@ -346,4 +390,11 @@ try {
 """
 
 
-__all__ = ["check_for_update", "get_current_version", "get_latest_release", "get_startup_update_status", "run_update_flow"]
+__all__ = [
+    "check_for_update",
+    "clear_staged_update_files",
+    "get_current_version",
+    "get_latest_release",
+    "get_startup_update_status",
+    "run_update_flow",
+]

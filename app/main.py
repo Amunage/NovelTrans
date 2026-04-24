@@ -15,7 +15,7 @@ from app.settings.config import (
 )
 from app.settings.logging import get_log_path, log_runtime_event
 from app.settings.precheck import get_glossary_candidate_block_reason, get_translation_block_reason
-from app.settings.update import get_startup_update_status
+from app.settings.update import clear_staged_update_files, get_startup_update_status
 from app.extract.crawler import main as crawler_main
 from app.settings.setup import ensure_llama_cpp_runtime, ensure_runtime_setup
 from app.terms import main as glossary_main
@@ -25,12 +25,12 @@ from app.ui.render import render_main_menu
 from app.ui.settings_flow import run_settings_menu
 from app.utils.diagnostics import run_full_diagnostics
 
-
 def main() -> int:
     try:
         log_runtime_event(f"main start | log_path={get_log_path()}")
         ensure_runtime_setup()
         status_message = get_startup_update_status()
+        clear_staged_update_files()
 
         while True:
             choice = prompt_main_menu(status_message)

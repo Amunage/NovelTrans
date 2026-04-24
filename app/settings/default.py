@@ -6,7 +6,7 @@ import json
 APP_VERSION = "1.2.3"
 UPDATE_REPOSITORY = "Amunage/NovelTrans"
 UPDATE_ASSET_KEYWORDS = ("NovelTrans", ".zip")
-DEFAULT_MODEL_FILENAME = "gemma-4-26B-A4B-it-UD-IQ4_NL.gguf"
+DEFAULT_MODEL_FILENAME = "gemma-4-E4B-it-Q4_K_M.gguf"
 EDITABLE_ENV_KEYS = [
     "LLAMA_SERVER_PATH",
     "LLAMA_MODEL_PATH",
