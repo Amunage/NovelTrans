@@ -4,6 +4,15 @@ from __future__ import annotations
 POSITIVE_INT_KEYS = {"MAX_CHARS", "TIMEOUT", "N_PREDICT", "CTX_SIZE", "STARTUP_TIMEOUT"}
 OPTIONAL_POSITIVE_INT_KEYS = {"GPU_LAYERS", "THREADS"}
 UNIT_FLOAT_KEYS = {"TOP_P"}
+TARGET_LANG_ALIASES = {
+    "ja": "japanese",
+    "jp": "japanese",
+    "japanese": "japanese",
+    "zh": "chinese",
+    "cn": "chinese",
+    "ch": "chinese",
+    "chinese": "chinese",
+}
 
 
 def validate_env_setting_value(key: str, new_value: str) -> str | None:
@@ -32,8 +41,8 @@ def validate_env_setting_value(key: str, new_value: str) -> str | None:
     if key == "REFINE_ENABLED" and normalized_value.lower() not in {"on", "off"}:
         return "[ERROR] REFINE_ENABLED는 on 또는 off만 사용할 수 있습니다."
 
-    if key == "TARGET_LANG" and normalized_value.lower() not in {"japanese", "chinese"}:
-        return "[ERROR] TARGET_LANG는 japanese 또는 chinese만 사용할 수 있습니다."
+    if key == "TARGET_LANG" and normalized_value.lower() not in TARGET_LANG_ALIASES:
+        return "[WARN] TARGET_LANG는 japanese/ja/jp 또는 chinese/zh/cn/ch만 사용할 수 있습니다. 다시 입력해 주세요."
 
     return None
 
@@ -43,7 +52,7 @@ def normalize_env_setting_value(key: str, new_value: str) -> str:
     if key in OPTIONAL_POSITIVE_INT_KEYS and normalized_value.lower() == "auto":
         return ""
     if key == "TARGET_LANG":
-        return normalized_value.lower()
+        return TARGET_LANG_ALIASES[normalized_value.lower()]
     return normalized_value
 
 

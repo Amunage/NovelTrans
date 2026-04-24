@@ -66,10 +66,25 @@ def load_glossary(glossary_path: Path | None) -> dict[str, str]:
     if glossary_path is None or not glossary_path.exists():
         return {}
 
-    data = json.loads(glossary_path.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(glossary_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise ValueError(f"Glossary file is not valid JSON: {glossary_path} ({exc})") from exc
     if not isinstance(data, dict):
         raise ValueError(f"Glossary file must contain a JSON object: {glossary_path}")
     return {str(key): str(value) for key, value in data.items()}
+
+
+def validate_glossary_file(glossary_path: Path | None) -> str | None:
+    if glossary_path is None or not glossary_path.exists():
+        return None
+
+    try:
+        load_glossary(glossary_path)
+    except ValueError as exc:
+        return f"[WARN] 용어집 JSON이 올바르지 않아 작업을 중단합니다: {exc}"
+
+    return None
 
 
 def build_prompts(

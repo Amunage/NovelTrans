@@ -12,16 +12,37 @@ import app.extract.webdriver as webdriver_helpers
 import cloudscraper
 
 from app.settings.config import (
+    APP_ROOT,
+    DATA_ROOT,
+    DATA_USER_ROOT,
     ENV_PATH,
     PROMPT_SETTINGS_PATH,
     get_runtime_settings,
     read_env_file,
 )
+from app.settings.default import DEFAULT_ENV_VALUES
 from app.settings.logging import get_log_path, log_runtime_event
 from app.settings.precheck import get_glossary_candidate_block_reason, get_translation_block_reason
 from app.settings.setup import ensure_runtime_setup
+from app.settings.update import UpdateNotConfiguredError, get_current_version, get_latest_release
+from app.translation.engine import validate_glossary_file
 from app.ui import render_diagnostics_screen
 from app.utils.helpers import find_chapter_files, find_source_novels, parse_source_file
+
+
+TARGET_LANG_LABELS = {
+    "japanese": "일->한",
+    "chinese": "중->한",
+}
+TARGET_LANG_ALIASES = {
+    "ja": "japanese",
+    "jp": "japanese",
+    "japanese": "japanese",
+    "zh": "chinese",
+    "cn": "chinese",
+    "ch": "chinese",
+    "chinese": "chinese",
+}
 
 
 @dataclass(frozen=True)
@@ -39,26 +60,59 @@ def _format_result_line(result: DiagnosticResult) -> str:
     return f"[{result.status}] {result.name}: {result.detail}"
 
 
+def _repair_status(existed_before: bool) -> str:
+    return "PASS" if existed_before else "REPAIRED"
+
+
 def _check_runtime_files() -> list[DiagnosticResult]:
     results: list[DiagnosticResult] = []
+    expected_paths = {
+        "env file": ENV_PATH,
+        "prompt settings": PROMPT_SETTINGS_PATH,
+        "data root": DATA_ROOT,
+        "user data folder": DATA_USER_ROOT,
+        "llama folder": DATA_ROOT / "llama",
+        "models folder": DATA_ROOT / "models",
+        "source folder": APP_ROOT / "source",
+        "translated folder": APP_ROOT / "translated",
+        "glossary folder": DATA_ROOT / "glossary",
+        "default glossary": DATA_ROOT / "glossary" / "glossary.json",
+    }
+    existed_before = {name: path.exists() for name, path in expected_paths.items()}
 
     try:
         ensure_runtime_setup()
-        results.append(_result("runtime setup", "PASS", "default runtime files and folders are ready"))
+        repaired = [name for name, existed in existed_before.items() if not existed and expected_paths[name].exists()]
+        if repaired:
+            results.append(_result("runtime setup", "REPAIRED", "created missing defaults: " + ", ".join(repaired)))
+        else:
+            results.append(_result("runtime setup", "PASS", "default runtime files and folders are ready"))
     except Exception as exc:
         results.append(_result("runtime setup", "FAIL", str(exc)))
         return results
 
     env_values = read_env_file()
     if ENV_PATH.is_file():
-        results.append(_result("env file", "PASS", f"loaded {len(env_values)} keys from {ENV_PATH}"))
+        results.append(
+            _result(
+                "env file",
+                _repair_status(existed_before["env file"]),
+                f"loaded {len(env_values)} keys from {ENV_PATH}",
+            )
+        )
     else:
         results.append(_result("env file", "FAIL", f"missing file: {ENV_PATH}"))
 
     if PROMPT_SETTINGS_PATH.is_file():
         try:
             json.loads(PROMPT_SETTINGS_PATH.read_text(encoding="utf-8"))
-            results.append(_result("prompt settings", "PASS", f"valid JSON: {PROMPT_SETTINGS_PATH}"))
+            results.append(
+                _result(
+                    "prompt settings",
+                    _repair_status(existed_before["prompt settings"]),
+                    f"valid JSON: {PROMPT_SETTINGS_PATH}",
+                )
+            )
         except Exception as exc:
             results.append(_result("prompt settings", "FAIL", f"invalid JSON: {exc}"))
     else:
@@ -86,6 +140,27 @@ def _check_runtime_paths() -> list[DiagnosticResult]:
         results.append(_result("runtime settings", "FAIL", str(exc)))
         return results
 
+    env_values = read_env_file()
+    raw_target_lang = env_values.get("TARGET_LANG", DEFAULT_ENV_VALUES["TARGET_LANG"]).strip().lower()
+    if raw_target_lang in TARGET_LANG_ALIASES:
+        resolved_target_lang = TARGET_LANG_ALIASES[raw_target_lang]
+        results.append(
+            _result(
+                "target language",
+                "PASS",
+                f"{resolved_target_lang} ({TARGET_LANG_LABELS.get(resolved_target_lang, resolved_target_lang)})",
+            )
+        )
+    else:
+        fallback_label = TARGET_LANG_LABELS.get(settings.target_lang, settings.target_lang)
+        results.append(
+            _result(
+                "target language",
+                "WARN",
+                f"invalid TARGET_LANG={raw_target_lang!r}; using {settings.target_lang} ({fallback_label})",
+            )
+        )
+
     if settings.llama_server_path.is_file():
         results.append(_result("llama runtime", "PASS", f"server found: {settings.llama_server_path}"))
     else:
@@ -97,7 +172,11 @@ def _check_runtime_paths() -> list[DiagnosticResult]:
         results.append(_result("model file", "FAIL", f"missing model: {settings.llama_model_path}"))
 
     if settings.glossary_path.is_file():
-        results.append(_result("glossary file", "PASS", f"glossary found: {settings.glossary_path}"))
+        glossary_warning = validate_glossary_file(settings.glossary_path)
+        if glossary_warning is None:
+            results.append(_result("glossary file", "PASS", f"valid JSON object: {settings.glossary_path}"))
+        else:
+            results.append(_result("glossary file", "FAIL", glossary_warning))
     else:
         results.append(_result("glossary file", "WARN", f"missing glossary: {settings.glossary_path}"))
 
@@ -253,6 +332,21 @@ def _check_crawler_stack() -> list[DiagnosticResult]:
     return results
 
 
+def _check_update_release() -> list[DiagnosticResult]:
+    try:
+        release = get_latest_release()
+    except UpdateNotConfiguredError as exc:
+        return [_result("update release", "WARN", f"repository not configured: {exc}")]
+    except Exception as exc:
+        return [_result("update release", "WARN", f"latest release check failed: {exc}")]
+
+    return [
+        _result("current version", "PASS", get_current_version()),
+        _result("update release", "PASS", f"{release.tag_name} ({release.html_url})"),
+        _result("update asset", "PASS", f"{release.asset.name}"),
+    ]
+
+
 def run_full_diagnostics() -> str:
     log_runtime_event("diagnostics start")
 
@@ -263,6 +357,7 @@ def run_full_diagnostics() -> str:
         sections.append(("Source", _check_source_inventory()))
         sections.append(("Features", _check_feature_prerequisites()))
         sections.append(("Server", _check_server_health()))
+        sections.append(("Update", _check_update_release()))
         sections.append(("Crawler", _check_crawler_stack()))
     except Exception as exc:
         fallback_lines = [
@@ -280,6 +375,7 @@ def run_full_diagnostics() -> str:
 
     lines: list[str] = []
     total_pass = 0
+    total_repaired = 0
     total_warn = 0
     total_fail = 0
 
@@ -289,6 +385,8 @@ def run_full_diagnostics() -> str:
             lines.append(_format_result_line(result))
             if result.status == "PASS":
                 total_pass += 1
+            elif result.status == "REPAIRED":
+                total_repaired += 1
             elif result.status == "WARN":
                 total_warn += 1
             elif result.status == "FAIL":
@@ -298,7 +396,7 @@ def run_full_diagnostics() -> str:
     if lines and lines[-1] == "":
         lines.pop()
 
-    summary = f"FAIL {total_fail} | WARN {total_warn} | PASS {total_pass}"
+    summary = f"FAIL {total_fail} | WARN {total_warn} | REPAIRED {total_repaired} | PASS {total_pass}"
     render_diagnostics_screen(
         lines=lines,
         summary=summary,

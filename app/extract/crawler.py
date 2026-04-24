@@ -29,6 +29,11 @@ from app.utils import parse_chapter_selection
 
 OUTPUT_PATH = get_runtime_settings().source_path
 
+_MIN_DELAY_SECONDS = 0.3
+_DELAY_JITTER_RATIO = 0.25
+_DELAY_EXTRA_PAUSE_CHANCE = 0.12
+_DELAY_EXTRA_PAUSE_RANGE = (0.8, 2.4)
+
 
 def _filter_chapters(
     chapters: list[Chapter],
@@ -41,6 +46,17 @@ def _filter_chapters(
         if (start_chapter is None or chapter[0] >= start_chapter)
         and (end_chapter is None or chapter[0] <= end_chapter)
     ]
+
+
+def _build_request_delay(base_delay: float) -> float:
+    safe_delay = max(_MIN_DELAY_SECONDS, base_delay)
+    jitter = safe_delay * _DELAY_JITTER_RATIO
+    randomized_delay = random.uniform(max(_MIN_DELAY_SECONDS, safe_delay - jitter), safe_delay + jitter)
+
+    if random.random() < _DELAY_EXTRA_PAUSE_CHANCE:
+        randomized_delay += random.uniform(*_DELAY_EXTRA_PAUSE_RANGE)
+
+    return randomized_delay
 
 
 class NovelCrawler:
@@ -149,6 +165,7 @@ class NovelCrawler:
                 self.selenium_fetcher = SeleniumPageFetcher(self.session)
             html = self.selenium_fetcher.fetch_html(url)
         except Exception as error:
+            fetch_helpers.reset_selenium_fallback(self)
             self.last_error_message = f"Selenium fallback 실패: {error}"
             log_runtime_event(f"crawler selenium fallback failed | url={url} | error={error!r}")
             print(f"[ERROR] Selenium fallback 실패: {error}")
@@ -265,7 +282,10 @@ class NovelCrawler:
             )
 
             if index < total:
-                actual_delay = delay + random.uniform(0.5, 1.5)
+                actual_delay = _build_request_delay(delay)
+                log_runtime_event(
+                    f"crawler inter-request delay | chapter={num} | base_delay={delay:.2f} | actual_delay={actual_delay:.2f}"
+                )
                 time.sleep(actual_delay)
 
         self.last_failed_count = len(failed_chapters)

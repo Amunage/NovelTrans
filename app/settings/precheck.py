@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from app.settings.config import get_configured_model_path, get_configured_source_path
+from app.settings.config import get_configured_model_path, get_configured_source_path, get_runtime_settings
+from app.translation.engine import validate_glossary_file
 from app.utils import find_chapter_files, find_source_novels
 
 
@@ -8,6 +9,10 @@ def get_translation_block_reason() -> str | None:
     model_path = get_configured_model_path()
     if not model_path.is_file():
         return "[ERROR] GGUF 모델이 없습니다. 설정을 확인해주세요."
+
+    glossary_warning = validate_glossary_file(get_runtime_settings().glossary_path)
+    if glossary_warning is not None:
+        return glossary_warning
 
     source_path = get_configured_source_path()
     if not source_path.exists() or not source_path.is_dir():

@@ -17,6 +17,7 @@ from app.ui.render import (
     render_crawler_error_screen,
     render_crawler_screen,
     render_env_settings_menu,
+    render_glossary_min_term_count_screen,
     render_glossary_selection_screen,
     render_main_menu,
     render_settings_menu,
@@ -118,14 +119,28 @@ def prompt_glossary_novel_choice(
     *,
     source_root: Path,
     novel_dirs: Sequence[Path],
+    target_lang: str | None = None,
     status_message: str | None = None,
 ) -> str:
     render_glossary_selection_screen(
         source_root=source_root,
         novel_dirs=novel_dirs,
+        target_lang=target_lang,
         status_message=status_message,
     )
     return input("").strip()
+
+
+def prompt_glossary_min_term_count(
+    *,
+    default_count: int,
+    status_message: str | None = None,
+) -> str:
+    render_glossary_min_term_count_screen(
+        default_count=default_count,
+        status_message=status_message,
+    )
+    return input("최소 출현 횟수: ").strip()
 
 
 def wait_for_enter() -> None:
@@ -181,6 +196,7 @@ def prompt_for_source_files_with_ui(source_root: Path) -> list[Path]:
                 step="novel",
                 source_root=source_root,
                 novel_dirs=novel_dirs,
+                target_lang=runtime_settings.target_lang,
                 status_message=status_message,
             )
             raw = input("").strip()
@@ -207,6 +223,7 @@ def prompt_for_source_files_with_ui(source_root: Path) -> list[Path]:
             step="chapter",
             source_root=source_root,
             novel_dirs=novel_dirs,
+            target_lang=runtime_settings.target_lang,
             selected_novel=selected_novel,
             chapter_files=chapter_files,
             last_translated_label=_find_last_translated_label(chapter_files, runtime_settings.output_root),

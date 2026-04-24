@@ -18,9 +18,10 @@ from app.settings.precheck import get_glossary_candidate_block_reason, get_trans
 from app.settings.update import get_startup_update_status
 from app.extract.crawler import main as crawler_main
 from app.settings.setup import ensure_llama_cpp_runtime, ensure_runtime_setup
-from app.terms.entrypoint import main as glossary_main
+from app.terms import main as glossary_main
 from app.translation.base import main as translation_main
 from app.ui.control import prompt_main_menu, wait_for_enter
+from app.ui.render import render_main_menu
 from app.ui.settings_flow import run_settings_menu
 from app.utils.diagnostics import run_full_diagnostics
 
@@ -76,14 +77,15 @@ def main() -> int:
                 continue
 
             if choice == "4":
-                status_message = run_settings_menu()
-                if status_message == "__UPDATE_EXIT__":
-                    return 0
+                render_main_menu("[INFO] 시스템 진단 중...")
+                status_message = run_full_diagnostics()
+                wait_for_enter()
                 continue
 
             if choice == "5":
-                status_message = run_full_diagnostics()
-                wait_for_enter()
+                status_message = run_settings_menu()
+                if status_message == "__UPDATE_EXIT__":
+                    return 0
                 continue
 
             if choice == "=":

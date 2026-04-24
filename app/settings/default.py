@@ -49,8 +49,6 @@ DEFAULT_ENV_VALUES = {
 }
 DEFAULT_ENV_CONTENT = "\n".join(f"{key}={value}" for key, value in DEFAULT_ENV_VALUES.items()) + "\n"
 DEFAULT_GLOSSARY_CONTENT = """{
- "ウマ娘": "우마무스메",
- "トレ센": "트레센"
 }
 """
 DEFAULT_SEPARATOR_LINE = "=" * 60

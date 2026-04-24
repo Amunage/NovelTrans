@@ -1,12 +1,42 @@
+import atexit
+import contextlib
 import importlib
+import os
+import signal
+import subprocess
 import sys
 import time
 from pathlib import Path
+
+from app.settings.logging import log_runtime_event
 
 driver = None
 
 _RESTORED_WINDOW_SIZE = (960, 720)
 _RESTORED_WINDOW_POSITION = (80, 80)
+
+
+def _cleanup_webdriver_on_exit() -> None:
+    close_webdriver()
+
+
+def _kill_process_tree(pid: int | None) -> None:
+    if pid is None or pid <= 0:
+        return
+
+    try:
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return
+
+        os.kill(pid, signal.SIGKILL)
+    except OSError:
+        pass
 
 
 def _import_external_selenium_module(module_name: str):
@@ -91,12 +121,15 @@ def _start_chrome_uc(headless: bool, browser_path: str | None = None):
     if browser_path:
         driver_kwargs["binary_location"] = browser_path
 
-    return Driver(**driver_kwargs)
+    with open(os.devnull, "w", encoding="utf-8") as devnull:
+        with contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
+            return Driver(**driver_kwargs)
 
 
 def _start_edge_fallback(headless: bool):
     selenium_webdriver = _import_external_selenium_module("selenium.webdriver")
     Options = _import_external_selenium_module("selenium.webdriver.edge.options").Options
+    Service = _import_external_selenium_module("selenium.webdriver.edge.service").Service
 
     options = Options()
     if headless:
@@ -104,15 +137,17 @@ def _start_edge_fallback(headless: bool):
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_argument("--disable-infobars")
     options.add_argument("--lang=ja-JP")
+    options.add_argument("--log-level=3")
     options.add_argument("--window-size=1280,900")
-    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
     options.add_experimental_option("useAutomationExtension", False)
 
     edge_path = _windows_browser_path("edge")
     if edge_path:
         options.binary_location = edge_path
 
-    edge_driver = selenium_webdriver.Edge(options=options)
+    service = Service(log_output=subprocess.DEVNULL)
+    edge_driver = selenium_webdriver.Edge(service=service, options=options)
     edge_driver.execute_cdp_cmd(
         "Page.addScriptToEvaluateOnNewDocument",
         {
@@ -162,7 +197,6 @@ def start_webdriver(browser: str = "auto", headless: bool = False):
         return driver
 
     selected_browser = _choose_browser(browser)
-    print(f"Start WebDriver: {selected_browser}, headless={headless}")
 
     if selected_browser == "chrome":
         driver = _start_chrome_uc(headless=headless)
@@ -170,10 +204,8 @@ def start_webdriver(browser: str = "auto", headless: bool = False):
         whale_path = _windows_browser_path("whale")
         if not whale_path:
             raise ValueError("Naver Whale browser executable not found.")
-        print("Using Naver Whale with Chrome UC mode.")
         driver = _start_chrome_uc(headless=headless, browser_path=whale_path)
     elif selected_browser == "edge":
-        print("Chrome UC mode is unavailable; using Edge fallback with stealth options.")
         driver = _start_edge_fallback(headless=headless)
     else:
         raise ValueError(f"Unsupported browser: {browser}")
@@ -184,6 +216,21 @@ def start_webdriver(browser: str = "auto", headless: bool = False):
 def close_webdriver():
     global driver
     if driver:
-        print("Close WebDriver")
-        driver.quit()
-        driver = None
+        service_pid = None
+        try:
+            service_process = getattr(getattr(driver, "service", None), "process", None)
+            service_pid = getattr(service_process, "pid", None)
+        except Exception:
+            service_pid = None
+
+        try:
+            driver.quit()
+        except BaseException as error:
+            log_runtime_event(f"webdriver quit failed | error={error!r} | service_pid={service_pid}")
+        finally:
+            if service_pid is not None:
+                _kill_process_tree(service_pid)
+            driver = None
+
+
+atexit.register(_cleanup_webdriver_on_exit)

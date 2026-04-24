@@ -16,6 +16,7 @@ from app.translation.engine import (
     build_output_path,
     build_translated_document,
     translate_document,
+    validate_glossary_file,
     validate_paths,
 )
 from app.translation.refine import refine_document
@@ -89,6 +90,13 @@ def main() -> int:
         config = prompt_for_missing_paths(config)
         if not selected_source_files:
             log_runtime_event("translation main cancelled | reason=no_source_files")
+            return 0
+
+        glossary_warning = validate_glossary_file(config.glossary_path)
+        if glossary_warning is not None:
+            log_runtime_event(f"translation main blocked | reason=invalid_glossary | path={config.glossary_path}")
+            print(glossary_warning)
+            wait_for_enter()
             return 0
 
         translation_started_at = time.monotonic()

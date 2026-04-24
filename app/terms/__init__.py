@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 from app.settings.config import get_runtime_settings
 from app.terms.chinese import CHINESE_GLOSSARY
 from app.terms.japanese import JAPANESE_GLOSSARY
+from app.terms.base import run_glossary_workflow
 
 if TYPE_CHECKING:
     from app.terms.base import GlossaryLanguageSupport
@@ -21,4 +22,8 @@ def get_glossary_language() -> GlossaryLanguageSupport:
     return SUPPORTED_GLOSSARY_LANGUAGES[runtime_settings.target_lang]
 
 
-__all__ = ["get_glossary_language", "SUPPORTED_GLOSSARY_LANGUAGES"]
+def main() -> int:
+    return run_glossary_workflow(get_glossary_language())
+
+
+__all__ = ["get_glossary_language", "main", "SUPPORTED_GLOSSARY_LANGUAGES"]

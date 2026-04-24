@@ -9,10 +9,23 @@ from typing import Callable, Iterable
 
 from app.server.llama import LlamaCppServerClient, start_llama_server, stop_llama_server
 from app.settings.config import DATA_ROOT, get_runtime_settings
+from app.settings.downloads import DownloadCancelledError, download_file
 from app.settings.logging import log_runtime_event
-from app.ui.control import parse_command, prompt_glossary_novel_choice, wait_for_enter
+from app.terms.wordlist import (
+    clear_wordlist_cache,
+    get_language_wordlist_filename,
+    get_wordlist_download_url,
+    get_wordlist_path,
+)
+from app.ui.control import (
+    parse_command,
+    prompt_glossary_min_term_count,
+    prompt_glossary_novel_choice,
+    wait_for_enter,
+)
 from app.translation.engine import TranslationConfig
 from app.ui import (
+    render_download_progress_screen,
     render_glossary_candidate_progress_screen,
     render_glossary_complete_screen,
     render_glossary_refine_progress_screen,
@@ -31,8 +44,9 @@ SENTENCE_SPLIT_PATTERN = re.compile(r"(?<=[。！？.!?])\s+|\n+")
 class GlossaryLanguageSupport:
     key: str
     source_label: str
-    extract_glossary_candidates: Callable[[Path], dict[str, str]]
+    extract_glossary_candidates: Callable[[Path, int], dict[str, str]]
     build_refine_prompt: Callable[[str, list[tuple[str, str]]], str]
+    default_min_term_count: int = 5
 
 
 def _normalize_sentence(sentence: str) -> str:
@@ -178,6 +192,74 @@ def _build_glossary_model_config() -> TranslationConfig:
     )
 
 
+def ensure_language_wordlist(language_key: str) -> str | None:
+    filename = get_language_wordlist_filename(language_key)
+    if filename is None:
+        return None
+
+    destination = get_wordlist_path(filename)
+    if destination.is_file():
+        return None
+
+    download_url = get_wordlist_download_url(filename)
+    log_runtime_event(f"wordlist download start | language={language_key} | destination={destination}")
+    try:
+        download_file(
+            download_url,
+            destination,
+            filename,
+            1,
+            1,
+            request_headers={"User-Agent": "noveltrans-wordlist-downloader"},
+            render_progress=lambda asset_name, percent, speed_mbps: render_download_progress_screen(
+                title="Dictionary download",
+                message=f"Downloading {language_key} glossary dictionary...",
+                item_label="Dictionary",
+                item_name=asset_name,
+                destination_path=str(destination),
+                percent=max(0, min(percent, 100)),
+                speed_mbps=speed_mbps,
+            ),
+        )
+    except DownloadCancelledError as exc:
+        log_runtime_event(f"wordlist download cancelled | language={language_key} | asset={exc.asset_name}")
+        return "[WARN] 사전 다운로드를 취소했습니다. 사전 필터 없이 진행합니다."
+    except Exception as exc:
+        log_runtime_event(f"wordlist download failed | language={language_key} | error={exc!r}")
+        return f"[WARN] 사전 다운로드에 실패했습니다. 사전 필터 없이 진행합니다: {exc}"
+
+    clear_wordlist_cache()
+    log_runtime_event(f"wordlist download complete | language={language_key} | destination={destination}")
+    return None
+
+
+def _prompt_min_term_count(default_count: int) -> int | None:
+    status_message: str | None = None
+
+    while True:
+        raw = prompt_glossary_min_term_count(
+            default_count=default_count,
+            status_message=status_message,
+        )
+        command = parse_command(raw)
+        if command == "back":
+            return None
+        if raw == "":
+            return default_count
+
+        try:
+            value = int(raw)
+        except ValueError:
+            status_message = "[ERROR] 1 이상의 정수를 입력해 주세요."
+            continue
+
+        if value < 1:
+            status_message = "[ERROR] 1 이상의 정수를 입력해 주세요."
+            continue
+
+        return value
+
+
 def refine_glossary_candidates(
     novel_dir: Path,
     candidates: dict[str, str],
@@ -255,12 +337,20 @@ def run_glossary_workflow(language: GlossaryLanguageSupport) -> int:
     if not novel_dirs:
         raise ValueError(f"No source novel folders found: {source_root}")
 
-    status_message = None
+    render_glossary_candidate_progress_screen("사전 파일을 확인하는 중...")
+    status_message = ensure_language_wordlist(language.key)
+    min_term_count = _prompt_min_term_count(language.default_min_term_count)
+    if min_term_count is None:
+        return 0
+
+    min_count_message = f"[INFO] 최소 출현 횟수: {min_term_count}"
+    status_message = f"{status_message}\n{min_count_message}" if status_message else min_count_message
 
     while True:
         raw = prompt_glossary_novel_choice(
             source_root=source_root,
             novel_dirs=novel_dirs,
+            target_lang=language.key,
             status_message=status_message,
         )
         command = parse_command(raw)
@@ -279,10 +369,11 @@ def run_glossary_workflow(language: GlossaryLanguageSupport) -> int:
 
         novel_dir = novel_dirs[selected_index]
         log_runtime_event(
-            f"glossary candidate generation start | novel_dir={novel_dir} | target_lang={language.key}"
+            f"glossary candidate generation start | novel_dir={novel_dir} | target_lang={language.key} | "
+            f"min_term_count={min_term_count}"
         )
         render_glossary_candidate_progress_screen("후보 추출 중...")
-        candidates = language.extract_glossary_candidates(novel_dir)
+        candidates = language.extract_glossary_candidates(novel_dir, min_term_count)
         glossary_started_at = time.monotonic()
         glossary = refine_glossary_candidates(novel_dir, candidates, language)
         output_path = save_final_glossary(novel_dir, glossary)

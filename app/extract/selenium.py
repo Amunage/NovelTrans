@@ -27,6 +27,7 @@ _CHAPTER_RECOGNITION_SELECTORS = (
     ".p-novel__body",
     ".js-novel-text",
     ".p-eplist__sublist a",
+    'a[href*="/txt/"]',
     'a[href*="/episodes/"]',
     'a[href$=".html"]',
     "script#__NEXT_DATA__",

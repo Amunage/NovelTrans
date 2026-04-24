@@ -28,6 +28,10 @@ SETTING_DESCRIPTIONS = {
     "STARTUP_TIMEOUT": "정수(초) | 서버 시작 대기 시간",
 }
 AUTO_DISPLAY_ENV_KEYS = {"GPU_LAYERS", "THREADS"}
+TRANSLATION_TARGET_LABELS = {
+    "japanese": "일본어",
+    "chinese": "중국어",
+}
 
 
 def clear_screen() -> None:
@@ -74,6 +78,12 @@ def format_env_setting_value(key: str, value: str) -> str:
     return value
 
 
+def format_translation_target_label(target_lang: str | None) -> str:
+    if target_lang is None:
+        return "알 수 없음"
+    return TRANSLATION_TARGET_LABELS.get(target_lang, target_lang)
+
+
 def render_main_menu(status_message: str | None = None) -> None:
     clear_screen()
     _print_header("메인 메뉴")
@@ -82,8 +92,8 @@ def render_main_menu(status_message: str | None = None) -> None:
     print("[1] 웹소설 추출")
     print("[2] 텍스트 번역")
     print("[3] 용어집 생성")
-    print("[4] 환경 설정")
-    print("[5] 시스템 진단")
+    print("[4] 시스템 진단")
+    print("[5] 환경 설정")
     print("[=] 종료")
     print("-" * 60)
     print(status_message or "")
@@ -157,7 +167,7 @@ def render_crawler_screen(
         print("추출 범위를 입력해 주세요. (예: 3~15 또는 3-15, 빈값이면 전체)")
     elif step == "delay" and chapters:
         print(f"대상 챕터: {len(chapters)}개 ({chapters[0][0]}~{chapters[-1][0]})")
-        print("요청 간격을 입력해 주세요. (빈값이면 기본 1.0초)")
+        print("요청 간격을 입력해 주세요. (빈값이면 기본 1.0초, 실제 요청은 약간 랜덤하게 분산됨)")
 
     print("-" * 60)
     print(status_message or "")
@@ -172,22 +182,21 @@ def render_crawler_error_screen(
 ) -> None:
     clear_screen()
     _print_header("추출 오류")
+    print("= 뒤로가기")
+    print("-" * 60)
     print(f"URL: {url}")
     print(f"오류: {error}")
     print("-" * 60)
-    if waiting_for_retry:
-        print("명령: = 입력 시 이전 오류 메뉴로")
-    else:
-        print("명령: 숫자 1~4 입력")
-    print("-" * 60)
-    print(status_message or "")
-    print("-" * 60)
-
     if not waiting_for_retry:
         print("  [1] 이 챕터 건너뛰고 계속 진행")
         print("  [2] 이 챕터 다시 시도")
         print("  [3] 이후 오류는 모두 자동 건너뛰기")
         print("  [4] 추출 중단")
+    print("-" * 60)
+    print(status_message or "")
+    print("-" * 60)
+
+
 
 
 def render_wait_screen(wait_time: float) -> None:
@@ -244,6 +253,7 @@ def render_translation_selection_screen(
     step: str,
     source_root: Path,
     novel_dirs: Sequence[Path],
+    target_lang: str | None = None,
     selected_novel: Path | None = None,
     chapter_files: Sequence[Path] | None = None,
     last_translated_label: str | None = None,
@@ -253,7 +263,8 @@ def render_translation_selection_screen(
     _print_header("텍스트 번역")
     print("= 뒤로가기")
     print("-" * 60)
-    print(f"소스 폴더: {source_root}")
+    print(f"탐색 폴더: {source_root}")
+    print(f"소설 언어: {format_translation_target_label(target_lang)}")
 
     if step == "novel":
         print("번역할 소설 번호를 입력해 주세요.")
@@ -336,17 +347,36 @@ def render_glossary_selection_screen(
     *,
     source_root: Path,
     novel_dirs: Sequence[Path],
+    target_lang: str | None = None,
     status_message: str | None = None,
 ) -> None:
     clear_screen()
     _print_header("용어집 생성")
     print("= 뒤로가기")
     print("-" * 60)
-    print(f"소설 폴더: {source_root}")
-    print("탐색할 소설 번호를 입력해 주세요.")
+    print(f"탐색 폴더: {source_root}")
+    print(f"소설 언어: {format_translation_target_label(target_lang)}")
+    print("생성할 소설 번호를 입력해 주세요.")
     print("-" * 60)
     for index, novel_dir in enumerate(novel_dirs, start=1):
         print(f"[{index}] {novel_dir.name}")
+    print("-" * 60)
+    print(status_message or "")
+    print("-" * 60)
+
+
+def render_glossary_min_term_count_screen(
+    *,
+    default_count: int,
+    status_message: str | None = None,
+) -> None:
+    clear_screen()
+    _print_header("용어집 생성")
+    print("= 뒤로가기")
+    print("-" * 60)
+    print("용어 후보로 인정할 최소 출현 횟수를 입력해 주세요.")
+    print(f"기본값: {default_count}")
+    print("빈 값으로 입력하면 기본값을 사용합니다.")
     print("-" * 60)
     print(status_message or "")
     print("-" * 60)

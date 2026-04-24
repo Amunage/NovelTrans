@@ -6,6 +6,7 @@ from app.extract.site.base import Chapter, SiteExtractor
 from app.extract.site.kakuyomu import KakuyomuExtractor
 from app.extract.site.narou import NarouExtractor
 from app.extract.site.pixiv import PixivExtractor
+from app.extract.site.shuba69 import Shuba69Extractor
 from app.extract.site.syosetu_org import SyosetuOrgExtractor
 from app.extract.site.twkan import TwkanExtractor
 
@@ -16,6 +17,7 @@ EXTRACTORS: tuple[type[SiteExtractor], ...] = (
     KakuyomuExtractor,
     PixivExtractor,
     TwkanExtractor,
+    Shuba69Extractor,
 )
 
 

@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import re
-from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Iterable
 
-from app.terms.base import GlossaryLanguageSupport, _choose_example_sentence, _normalize_sentence, _split_sentences
-from app.terms.dictionary import has_dictionary_word
-from app.utils import find_chapter_files, parse_source_file
+from app.terms.base import GlossaryLanguageSupport
+from app.terms.candidate import TermExtractionConfig, extract_candidates
+from app.terms.wordlist import has_word
 
 
 TERM_CHAR_CLASS = r"\u4e00-\u9faf\u3005\u3006\u30f5\u30f6\u30a1-\u30f4\u30fc\u30fb"
@@ -19,7 +18,7 @@ KANJI_PATTERN = re.compile(r"[\u4e00-\u9faf]")
 KATAKANA_PATTERN = re.compile(r"[\u30a1-\u30f4]")
 
 MIN_TERM_COUNT = 5
-MIN_FILE_COUNT = 3
+MIN_FILE_COUNT = 1
 MAX_CANDIDATES = 300
 MIN_TERM_SCORE = 4.0
 JAPANESE_DICT_FILENAME = "japanese_dict.txt"
@@ -169,7 +168,7 @@ def _is_dictionary_word(term: str) -> bool:
     compact_term = term.replace(" ", "").replace("・", "")
     if len(compact_term) < 2:
         return False
-    return has_dictionary_word(JAPANESE_DICT_FILENAME, compact_term)
+    return has_word(JAPANESE_DICT_FILENAME, compact_term)
 
 
 def _has_honorific_context(term: str, sentences: list[str]) -> bool:
@@ -219,6 +218,14 @@ def _score_term(term: str, count: int, file_count: int, sentences: list[str]) ->
     return score
 
 
+def _reject_match(text: str, match: re.Match[str], term: str) -> bool:
+    return _is_embedded_kanji_stem(text, match.start(), match.end(), term)
+
+
+def _reject_candidate(term: str, sentences: list[str]) -> bool:
+    return _is_dictionary_word(term) and not _has_name_like_usage(term, sentences)
+
+
 def build_refine_prompt(novel_name: str, candidates: list[tuple[str, str]]) -> str:
     prompt_lines = GLOSSARY_SYSTEM_INSTRUCTIONS.copy()
     prompt_lines.append(f"Novel: {novel_name}")
@@ -234,57 +241,22 @@ def build_refine_prompt(novel_name: str, candidates: list[tuple[str, str]]) -> s
     return "\n".join(prompt_lines)
 
 
-def extract_glossary_candidates(novel_dir: Path) -> dict[str, str]:
-    chapter_files = find_chapter_files(novel_dir)
-    term_counts: Counter[str] = Counter()
-    file_counts: Counter[str] = Counter()
-    sentences_by_term: dict[str, list[str]] = defaultdict(list)
-
-    for chapter_file in chapter_files:
-        document = parse_source_file(chapter_file)
-        chapter_text = "\n".join([document.title, document.body])
-        sentences = _split_sentences(chapter_text)
-        seen_terms_in_file: set[str] = set()
-
-        for match in _iter_term_matches(chapter_text):
-            term = _normalize_term(match.group(0))
-            if not _is_valid_term(term):
-                continue
-            if _is_embedded_kanji_stem(chapter_text, match.start(), match.end(), term):
-                continue
-            term_counts[term] += 1
-            seen_terms_in_file.add(term)
-
-        for term in seen_terms_in_file:
-            file_counts[term] += 1
-
-        for sentence in sentences:
-            found_terms: set[str] = set()
-            for match in _iter_term_matches(sentence):
-                term = _normalize_term(match.group(0))
-                if not _is_valid_term(term):
-                    continue
-                if _is_embedded_kanji_stem(sentence, match.start(), match.end(), term):
-                    continue
-                found_terms.add(term)
-
-            for term in found_terms:
-                sentences_by_term[term].append(_normalize_sentence(sentence))
-
-    scored_candidates: list[tuple[str, str, float, int]] = []
-    for source_order, (term, count) in enumerate(term_counts.most_common()):
-        if count < MIN_TERM_COUNT or file_counts[term] < MIN_FILE_COUNT:
-            continue
-        sentences = sentences_by_term.get(term, [])
-        if _is_dictionary_word(term) and not _has_name_like_usage(term, sentences):
-            continue
-        term_score = _score_term(term, count, file_counts[term], sentences)
-        if term_score < MIN_TERM_SCORE:
-            continue
-        scored_candidates.append((term, _choose_example_sentence(term, sentences), term_score, source_order))
-
-    scored_candidates.sort(key=lambda item: (-item[2], item[3]))
-    return {term: example for term, example, _, _ in scored_candidates[:MAX_CANDIDATES]}
+def extract_glossary_candidates(novel_dir: Path, min_term_count: int = MIN_TERM_COUNT) -> dict[str, str]:
+    return extract_candidates(
+        novel_dir,
+        TermExtractionConfig(
+            iter_matches=_iter_term_matches,
+            normalize_term=_normalize_term,
+            is_valid_term=_is_valid_term,
+            reject_match=_reject_match,
+            reject_candidate=_reject_candidate,
+            score_term=_score_term,
+            min_term_count=min_term_count,
+            min_file_count=MIN_FILE_COUNT,
+            min_term_score=MIN_TERM_SCORE,
+            max_candidates=MAX_CANDIDATES,
+        ),
+    )
 
 
 JAPANESE_GLOSSARY = GlossaryLanguageSupport(
@@ -292,4 +264,5 @@ JAPANESE_GLOSSARY = GlossaryLanguageSupport(
     source_label="Japanese",
     extract_glossary_candidates=extract_glossary_candidates,
     build_refine_prompt=build_refine_prompt,
+    default_min_term_count=MIN_TERM_COUNT,
 )

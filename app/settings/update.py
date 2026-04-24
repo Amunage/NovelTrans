@@ -67,13 +67,19 @@ def get_startup_update_status() -> str:
 
 
 def check_for_update() -> UpdateRelease | None:
-    repository = _get_update_repository()
-    release = _fetch_latest_release(repository)
-    latest_version = _normalize_version(str(release.get("tag_name", "")))
+    release = get_latest_release()
+    latest_version = release.version
     current_version = _normalize_version(get_current_version())
     if _compare_versions(latest_version, current_version) <= 0:
         return None
 
+    return release
+
+
+def get_latest_release() -> UpdateRelease:
+    repository = _get_update_repository()
+    release = _fetch_latest_release(repository)
+    latest_version = _normalize_version(str(release.get("tag_name", "")))
     asset = _select_release_asset(release)
     return UpdateRelease(
         version=latest_version,
@@ -86,24 +92,30 @@ def check_for_update() -> UpdateRelease | None:
 def run_update_flow() -> tuple[str, bool]:
     current_version = get_current_version()
     try:
-        release = check_for_update()
+        release = get_latest_release()
     except UpdateNotConfiguredError as exc:
         return f"[WARN] {exc}", False
     except Exception as exc:
         log_runtime_event(f"update check failed | error={exc!r}")
         return f"[ERROR] 업데이트 확인에 실패했습니다: {exc}", False
 
-    if release is None:
-        return f"[INFO] 최신 버전입니다. 현재 버전: {current_version}", False
-
     if not getattr(sys, "frozen", False):
+        if _compare_versions(release.version, _normalize_version(current_version)) <= 0:
+            return (
+                f"[INFO] 최신버전입니다. 현재 버전: {current_version}. "
+                "업데이트 재설치는 빌드된 exe에서만 사용할 수 있습니다.",
+                False,
+            )
         return (
             f"[INFO] 업데이트 가능: {current_version} -> {release.tag_name}. "
             "설치는 빌드된 exe에서만 사용할 수 있습니다.",
             False,
         )
 
-    print(f"[INFO] 업데이트 가능: {current_version} -> {release.tag_name}")
+    if _compare_versions(release.version, _normalize_version(current_version)) > 0:
+        print(f"[INFO] 업데이트 가능: {current_version} -> {release.tag_name}")
+    else:
+        print(f"[INFO] 최신버전입니다. 현재 버전: {current_version}, 최신 릴리즈: {release.tag_name}")
     print(f"[INFO] 파일: {release.asset.name}")
     print("지금 업데이트할까요? (y/n)")
     if input("").strip().lower() != "y":
@@ -334,4 +346,4 @@ try {
 """
 
 
-__all__ = ["check_for_update", "get_current_version", "get_startup_update_status", "run_update_flow"]
+__all__ = ["check_for_update", "get_current_version", "get_latest_release", "get_startup_update_status", "run_update_flow"]

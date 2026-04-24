@@ -39,6 +39,7 @@ def get_page_with_selenium(crawler: CrawlerFetchState, url: str, reason: str) ->
             crawler.selenium_fetcher = SeleniumPageFetcher(crawler.session)
         html = crawler.selenium_fetcher.fetch_html(url)
     except Exception as error:
+        reset_selenium_fallback(crawler)
         crawler.last_error_message = f"Selenium fallback 실패: {error}"
         log_runtime_event(f"crawler selenium fallback failed | url={url} | error={error!r}")
         print(f"[ERROR] Selenium fallback 실패: {error}")
@@ -94,6 +95,7 @@ def handle_interactive_error(crawler: CrawlerFetchState, url: str, error: Except
 
                 render_wait_screen(wait_time)
                 time.sleep(wait_time)
+                reset_selenium_fallback(crawler)
                 return crawler.get_page(url)
 
         if choice == "3":
@@ -107,9 +109,22 @@ def handle_interactive_error(crawler: CrawlerFetchState, url: str, error: Except
         status_message = "잘못된 선택입니다. 다시 입력해주세요."
 
 
+def reset_selenium_fallback(crawler: CrawlerFetchState) -> None:
+    if crawler.selenium_fetcher is None:
+        return
+
+    try:
+        crawler.selenium_fetcher.close()
+    except Exception as close_error:
+        log_runtime_event(f"crawler selenium fallback reset failed | error={close_error!r}")
+    finally:
+        crawler.selenium_fetcher = None
+
+
 __all__ = [
     "get_page_with_selenium",
     "handle_interactive_error",
     "handle_page_error",
     "is_cloudflare_challenge",
+    "reset_selenium_fallback",
 ]

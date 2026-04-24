@@ -33,7 +33,7 @@ def download_file(
     request_headers: dict[str, str] | None = None,
     render_progress: Callable[[str, int, float | None], None] | None = None,
 ) -> None:
-    request = urllib.request.Request(download_url, headers=request_headers)
+    request = urllib.request.Request(download_url, headers=request_headers or {})
     destination.parent.mkdir(parents=True, exist_ok=True)
     temp_destination = destination.with_suffix(destination.suffix + ".part")
     log_runtime_event(
