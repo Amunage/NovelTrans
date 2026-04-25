@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 
-POSITIVE_INT_KEYS = {"MAX_CHARS", "TIMEOUT", "N_PREDICT", "CTX_SIZE", "STARTUP_TIMEOUT"}
+POSITIVE_INT_KEYS = {"MAX_CHARS", "REQUEST_TIMEOUT", "MAX_TOKENS", "CTX_SIZE", "STARTUP_TIMEOUT"}
 OPTIONAL_POSITIVE_INT_KEYS = {"GPU_LAYERS", "THREADS"}
 UNIT_FLOAT_KEYS = {"TOP_P"}
+TRUE_VALUES = {"1", "true", "yes", "on"}
+FALSE_VALUES = {"0", "false", "no", "off"}
+BOOL_VALUES = TRUE_VALUES | FALSE_VALUES
 TARGET_LANG_ALIASES = {
     "ja": "japanese",
     "jp": "japanese",
@@ -38,8 +41,11 @@ def validate_env_setting_value(key: str, new_value: str) -> str | None:
         if int_value <= 0:
             return f"[ERROR] {key} 값은 1 이상이어야 합니다."
 
-    if key == "REFINE_ENABLED" and normalized_value.lower() not in {"on", "off"}:
-        return "[ERROR] REFINE_ENABLED는 on 또는 off만 사용할 수 있습니다."
+    if key == "REFINE_ENABLED" and normalized_value.lower() not in BOOL_VALUES:
+        return "[ERROR] REFINE_ENABLED는 true 또는 false만 사용할 수 있습니다."
+
+    if key == "DEBUG_MODE" and normalized_value.lower() not in BOOL_VALUES:
+        return "[ERROR] DEBUG_MODE는 true 또는 false만 사용할 수 있습니다."
 
     if key == "TARGET_LANG" and normalized_value.lower() not in TARGET_LANG_ALIASES:
         return "[WARN] TARGET_LANG는 japanese/ja/jp 또는 chinese/zh/cn/ch만 사용할 수 있습니다. 다시 입력해 주세요."
@@ -51,6 +57,8 @@ def normalize_env_setting_value(key: str, new_value: str) -> str:
     normalized_value = new_value.strip()
     if key in OPTIONAL_POSITIVE_INT_KEYS and normalized_value.lower() == "auto":
         return ""
+    if key in {"REFINE_ENABLED", "DEBUG_MODE"}:
+        return "true" if normalized_value.lower() in TRUE_VALUES else "false"
     if key == "TARGET_LANG":
         return TARGET_LANG_ALIASES[normalized_value.lower()]
     return normalized_value

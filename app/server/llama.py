@@ -58,14 +58,14 @@ class LlamaCppServerClient:
         sanitized = re.sub(r"\n{3,}", "\n\n", sanitized)
         return sanitized.strip()
 
-    def _build_payload(self, prompt: str, *, temperature: float, top_p: float, n_predict: int) -> dict:
+    def _build_payload(self, prompt: str, *, temperature: float, top_p: float, max_tokens: int) -> dict:
         return {
             "messages": [{"role": "user", "content": self._sanitize_prompt(prompt)}],
             "chat_template_kwargs": {"enable_thinking": False},
             "reasoning_format": "none",
             "temperature": temperature,
             "top_p": top_p,
-            "max_tokens": n_predict,
+            "max_tokens": max_tokens,
             "stop": [
                 "<chapter_title>",
                 "<previous_source>",
@@ -86,13 +86,13 @@ class LlamaCppServerClient:
         *,
         temperature: float,
         top_p: float,
-        n_predict: int,
+        max_tokens: int,
         wait_callback=None,
-    ) -> str:
-        payload = self._build_payload(prompt, temperature=temperature, top_p=top_p, n_predict=n_predict)
+    ) -> tuple[str, int]:
+        payload = self._build_payload(prompt, temperature=temperature, top_p=top_p, max_tokens=max_tokens)
         log_runtime_event(
             f"llama translate request start | url={self.chat_completion_url} | "
-            f"prompt_chars={len(prompt)} | n_predict={n_predict} | temperature={temperature}"
+            f"prompt_chars={len(prompt)} | max_tokens={max_tokens} | temperature={temperature}"
         )
 
         def send(payload_to_send: dict) -> str:
@@ -141,7 +141,7 @@ class LlamaCppServerClient:
                     self._sanitize_prompt(prompt).replace("<|channel>", "").replace("<channel|>", ""),
                     temperature=temperature,
                     top_p=top_p,
-                    n_predict=n_predict,
+                    max_tokens=max_tokens,
                 )
                 try:
                     response_body = send_with_wait(retry_payload)
@@ -174,13 +174,22 @@ class LlamaCppServerClient:
         choices = data.get("choices", [])
         message = choices[0].get("message", {}) if choices else {}
         content = message.get("content", "")
-        if not isinstance(content, str) or not content.strip():
+        usage = data.get("usage", {})
+        completion_tokens = usage.get("completion_tokens")
+        if not isinstance(content, str):
             log_runtime_event(f"llama translate empty response | response={data!r}")
             raise RuntimeError(f"Empty translation response: {data}")
+        if not isinstance(completion_tokens, int) or completion_tokens <= 0:
+            log_runtime_event(f"llama translate missing completion tokens | response={data!r}")
+            raise RuntimeError("llama-server response is missing usage.completion_tokens")
+        if not content.strip():
+            log_runtime_event(
+                f"llama translate blank content | url={self.chat_completion_url} | completion_tokens={completion_tokens}"
+            )
         log_runtime_event(
-            f"llama translate request complete | url={self.chat_completion_url} | response_chars={len(content)}"
+            f"llama translate request complete | url={self.chat_completion_url} | response_chars={len(content)} | completion_tokens={completion_tokens}"
         )
-        return content.strip()
+        return content.strip(), completion_tokens
 
 
 def start_llama_server(config: ServerRuntimeConfig) -> subprocess.Popen:

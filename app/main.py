@@ -24,6 +24,7 @@ from app.ui.control import prompt_main_menu, wait_for_enter
 from app.ui.render import render_main_menu
 from app.ui.settings_flow import run_settings_menu
 from app.utils.diagnostics import run_full_diagnostics
+from app.utils.merge import main as merge_main
 
 def main() -> int:
     try:
@@ -77,12 +78,19 @@ def main() -> int:
                 continue
 
             if choice == "4":
+                result = merge_main()
+                status_message = None
+                if result == 130:
+                    return 130
+                continue
+
+            if choice == "5":
                 render_main_menu("[INFO] 시스템 진단 중...")
                 status_message = run_full_diagnostics()
                 wait_for_enter()
                 continue
 
-            if choice == "5":
+            if choice == "6":
                 status_message = run_settings_menu()
                 if status_message == "__UPDATE_EXIT__":
                     return 0

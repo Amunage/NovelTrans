@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 import os
 import unicodedata
 from pathlib import Path
@@ -16,26 +17,74 @@ SETTING_DESCRIPTIONS = {
     "OUTPUT_ROOT": "폴더 경로 | 번역 결과 저장 폴더",
     "SERVER_URL": "URL | llama-server 주소, 예: http://127.0.0.1:8080",
     "MAX_CHARS": "정수 | 청크당 최대 글자 수",
-    "TIMEOUT": "정수(초) | 모델 응답 대기 시간",
+    "REQUEST_TIMEOUT": "정수(초) | 모델 응답 대기 시간",
     "DRAFT_TEMPERATURE": "0.0 ~ 1.0 | 낮을수록 보수적, 높을수록 창의적",
     "REFINE_TEMPERATURE": "0.0 ~ 1.0 | 낮을수록 보수적, 높을수록 창의적",
-    "REFINE_ENABLED": "on / off | 번역 후 다듬기 사용 여부",
+    "REFINE_ENABLED": "true / false | 번역 후 다듬기 사용 여부",
     "TOP_P": "0.0 ~ 1.0 | 낮을수록 좁게 선택, 높을수록 다양하게 선택",
-    "N_PREDICT": "정수 | 최대 출력 토큰 수",
+    "MAX_TOKENS": "정수 | 최대 출력 토큰 수",
     "CTX_SIZE": "정수 | 모델 컨텍스트 크기",
     "GPU_LAYERS": "정수 또는 auto | GPU에 올릴 레이어 수",
     "THREADS": "정수 또는 auto | CPU 스레드 수",
     "STARTUP_TIMEOUT": "정수(초) | 서버 시작 대기 시간",
+    "DEBUG_MODE": "true / false | 번역 UI에서 최종 프롬프트 표시 여부",
 }
 AUTO_DISPLAY_ENV_KEYS = {"GPU_LAYERS", "THREADS"}
 TRANSLATION_TARGET_LABELS = {
     "japanese": "일본어",
     "chinese": "중국어",
 }
+_ANSI_ENABLED = False
+_DIAGNOSTIC_STATUS_COLORS = {
+    "[FAIL]": "\x1b[31m",
+    "[WARN]": "\x1b[38;5;208m",
+    "[PASS]": "\x1b[32m",
+    "[REPAIRED]": "\x1b[36m",
+}
+_ANSI_RESET = "\x1b[0m"
 
 
 def clear_screen() -> None:
     os.system("cls")
+
+
+def _enable_windows_ansi_colors() -> None:
+    global _ANSI_ENABLED
+    if _ANSI_ENABLED or os.name != "nt":
+        return
+
+    kernel32 = getattr(ctypes, "windll", None)
+    if kernel32 is None:
+        return
+
+    try:
+        handle = kernel32.kernel32.GetStdHandle(-11)
+        if handle == 0 or handle == -1:
+            return
+
+        mode = ctypes.c_uint32()
+        if kernel32.kernel32.GetConsoleMode(handle, ctypes.byref(mode)) == 0:
+            return
+
+        enable_virtual_terminal_processing = 0x0004
+        if mode.value & enable_virtual_terminal_processing:
+            _ANSI_ENABLED = True
+            return
+
+        if kernel32.kernel32.SetConsoleMode(handle, mode.value | enable_virtual_terminal_processing) != 0:
+            _ANSI_ENABLED = True
+    except Exception:
+        return
+
+
+def _colorize_diagnostics_line(line: str) -> str:
+    if not _ANSI_ENABLED:
+        return line
+
+    for status, color in _DIAGNOSTIC_STATUS_COLORS.items():
+        if line.startswith(status):
+            return f"{color}{status}{_ANSI_RESET}{line[len(status):]}"
+    return line
 
 
 def _print_header(title: str) -> None:
@@ -72,6 +121,12 @@ def _format_elapsed_time(elapsed_seconds: int) -> str:
     return f"{minutes:02d}:{seconds:02d}"
 
 
+def _format_translation_speed(source_tokens_per_second: float | None) -> str:
+    if source_tokens_per_second is None:
+        return "측정 중..."
+    return f"{source_tokens_per_second:,.1f} tok/s"
+
+
 def format_env_setting_value(key: str, value: str) -> str:
     if key in AUTO_DISPLAY_ENV_KEYS and value.strip() == "":
         return "auto"
@@ -92,9 +147,69 @@ def render_main_menu(status_message: str | None = None) -> None:
     print("[1] 웹소설 추출")
     print("[2] 텍스트 번역")
     print("[3] 용어집 생성")
-    print("[4] 시스템 진단")
-    print("[5] 환경 설정")
+    print("[4] 번역본 병합")
+    print("[5] 시스템 진단")
+    print("[6] 환경 설정")
     print("[=] 종료")
+    print("-" * 60)
+    print(status_message or "")
+    print("-" * 60)
+
+
+def render_merge_selection_screen(
+    *,
+    output_root: Path,
+    novel_dirs: Sequence[Path],
+    status_message: str | None = None,
+) -> None:
+    clear_screen()
+    _print_header("번역본 병합")
+    print("= 뒤로가기")
+    print("-" * 60)
+    print(f"탐색 폴더: {output_root}")
+    print("병합할 소설 번호를 입력해 주세요.")
+    print("-" * 60)
+    for index, novel_dir in enumerate(novel_dirs, start=1):
+        print(f"[{index}] {novel_dir.name}")
+    print("-" * 60)
+    print(status_message or "")
+    print("-" * 60)
+
+
+def render_merge_group_size_screen(
+    *,
+    novel_dir: Path,
+    chapter_count: int,
+    status_message: str | None = None,
+) -> None:
+    clear_screen()
+    _print_header("번역본 병합")
+    print("= 뒤로가기")
+    print("-" * 60)
+    print(f"선택한 소설: {novel_dir.name}")
+    print(f"발견 챕터: {chapter_count}개")
+    print("몇 개씩 묶어 병합할지 숫자를 입력해 주세요. 0은 전체 병합입니다.")
+    print("-" * 60)
+    print(status_message or "")
+    print("-" * 60)
+
+
+def render_merge_complete_screen(
+    *,
+    novel_name: str,
+    output_dir: Path,
+    output_files: Sequence[Path],
+    status_message: str | None = None,
+) -> None:
+    clear_screen()
+    _print_header("번역본 병합 완료")
+    print("엔터를 누르면 돌아갑니다.")
+    print("-" * 60)
+    print(f"소설: {novel_name}")
+    print(f"출력 폴더: {output_dir}")
+    print(f"생성 파일: {len(output_files)}개")
+    for output_file in output_files:
+        print(f"- {output_file.name}")
     print("-" * 60)
     print(status_message or "")
     print("-" * 60)
@@ -119,12 +234,13 @@ def render_diagnostics_screen(
     summary: str,
     status_message: str | None = None,
 ) -> None:
+    _enable_windows_ansi_colors()
     clear_screen()
     _print_header("시스템 진단")
     print("Full system check results")
     print("-" * 60)
     for line in lines:
-        print(line)
+        print(_colorize_diagnostics_line(line))
     print("-" * 60)
     print(summary)
     print(status_message or "")
@@ -255,6 +371,9 @@ def render_translation_selection_screen(
     novel_dirs: Sequence[Path],
     target_lang: str | None = None,
     selected_novel: Path | None = None,
+    glossary_files: Sequence[Path] | None = None,
+    default_glossary: Path | None = None,
+    selected_glossary: Path | None = None,
     chapter_files: Sequence[Path] | None = None,
     last_translated_label: str | None = None,
     status_message: str | None = None,
@@ -264,17 +383,30 @@ def render_translation_selection_screen(
     print("= 뒤로가기")
     print("-" * 60)
     print(f"탐색 폴더: {source_root}")
-    print(f"소설 언어: {format_translation_target_label(target_lang)}")
 
     if step == "novel":
         print("번역할 소설 번호를 입력해 주세요.")
         print("-" * 60)
+        print(f"소설 언어: {format_translation_target_label(target_lang)}")
+        print("-" * 60)
         for index, novel_dir in enumerate(novel_dirs, start=1):
-            print(f"[{index}] {novel_dir.name}")
+            print(f" [{index}] {novel_dir.name}")
+    elif step == "glossary" and selected_novel is not None and glossary_files is not None:
+        print("번역에 사용할 용어집 번호를 입력해 주세요. 빈 값은 기본값입니다.")
+        print("-" * 60)
+        print(f"선택한 소설: {selected_novel.name}")
+        print(f"기본값: {default_glossary.name if default_glossary is not None else '없음'}")
+        print("-" * 60)
+        for index, glossary_file in enumerate(glossary_files, start=1):
+            prefix = "*" if default_glossary is not None and glossary_file == default_glossary else " "
+            print(f"{prefix}[{index}] {glossary_file.name}")
     elif step == "chapter" and selected_novel is not None and chapter_files is not None:
         print("번역할 챕터 번호 또는 범위를 입력해 주세요. (예: 3 또는 1~5, 1-5)")
         print("-" * 60)
         print(f"선택한 소설: {selected_novel.name}")
+        if selected_glossary is not None:
+            print(f"용어집: {selected_glossary.name}")
+        print("-" * 60)
         print(f"발견 챕터: {len(chapter_files)}개")
         print(f"마지막 번역 지점: {last_translated_label or '없음'}")
 
@@ -291,6 +423,7 @@ def render_translation_progress_screen(
     current: int,
     total: int,
     elapsed_seconds: int = 0,
+    source_tokens_per_second: float | None = None,
     source_file: Path,
     title: str,
     output_path: Path,
@@ -307,6 +440,7 @@ def render_translation_progress_screen(
         print(f"전체 진행: {_build_progress_bar(file_index - 1, total_files)} {file_index}/{total_files}")
         print(f"챕터 진행: {_build_progress_bar(current, total)} {current}/{total}")
 
+    print(f"번역 속도: {_format_translation_speed(source_tokens_per_second)}")
     print(f"경과 시간: {_format_elapsed_time(elapsed_seconds)}")
 
     if stage in {"초벌 번역", "다듬기"}:
@@ -327,6 +461,7 @@ def render_translation_complete_screen(
     output_root: Path,
     last_output_path: Path | None = None,
     elapsed_seconds: int = 0,
+    average_source_tokens_per_second: float | None = None,
     status_message: str | None = None,
 ) -> None:
     clear_screen()
@@ -334,6 +469,7 @@ def render_translation_complete_screen(
     print("엔터를 누르면 돌아갑니다.")
     print("-" * 60)
     print(f"완료 파일: {completed_files}/{total_files}")
+    print(f"평균 속도: {_format_translation_speed(average_source_tokens_per_second)}")
     print(f"경과 시간: {_format_elapsed_time(elapsed_seconds)}")
     print(f"출력 폴더: {output_root}")
     if last_output_path is not None:
@@ -355,8 +491,9 @@ def render_glossary_selection_screen(
     print("= 뒤로가기")
     print("-" * 60)
     print(f"탐색 폴더: {source_root}")
-    print(f"소설 언어: {format_translation_target_label(target_lang)}")
     print("생성할 소설 번호를 입력해 주세요.")
+    print("-" * 60)
+    print(f"소설 언어: {format_translation_target_label(target_lang)}")
     print("-" * 60)
     for index, novel_dir in enumerate(novel_dirs, start=1):
         print(f"[{index}] {novel_dir.name}")
@@ -375,8 +512,9 @@ def render_glossary_min_term_count_screen(
     print("= 뒤로가기")
     print("-" * 60)
     print("용어 후보로 인정할 최소 출현 횟수를 입력해 주세요.")
-    print(f"기본값: {default_count}")
     print("빈 값으로 입력하면 기본값을 사용합니다.")
+    print("-" * 60)
+    print(f"기본값: {default_count}")
     print("-" * 60)
     print(status_message or "")
     print("-" * 60)

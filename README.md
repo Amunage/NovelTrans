@@ -82,7 +82,7 @@ translated/
 - `DRAFT_TEMPERATURE` : 초벌 번역 직역 정도
 - `REFINE_TEMPERATURE` : 다듬기 문체 자연스러움 정도
 - `CTX_SIZE`: 컨텍스트 크기
-- `N_PREDICT`: 최대 출력 토큰 수
+- `MAX_TOKENS`: 최대 출력 토큰 수
 - `GPU_LAYERS`: GPU에 올릴 레이어 수
 - `THREADS`: CPU 스레드 수
 

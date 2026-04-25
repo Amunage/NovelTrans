@@ -1,18 +1,24 @@
 from __future__ import annotations
 
-from pathlib import Path
+import time
 from typing import Callable
 
 from app.translation.engine import (
     TranslationConfig,
     TranslatorClient,
-    atomic_write_text,
-    build_translated_document,
+    build_debug_prompt_status,
     load_glossary,
     report_progress,
 )
 from app.translation.language import get_refiner_instructions, get_translation_language
 from app.utils import normalize_translation, sanitize_model_text
+
+
+def filter_glossary_for_translation(text: str | None, glossary: dict[str, str]) -> dict[str, str]:
+    if not text or not glossary:
+        return {}
+
+    return {source: target for source, target in glossary.items() if target and target in text}
 
 
 def build_refine_prompts(
@@ -31,16 +37,17 @@ def build_refine_prompts(
         if previous_source is not None
         else None
     )
+    prompt_glossary = filter_glossary_for_translation(current_text, glossary)
 
     if is_title:
         prompt_lines.append("Return exactly one revised title only.")
     else:
         prompt_lines.append("Return only the revised Korean text.")
 
-    if glossary:
+    if prompt_glossary:
         prompt_lines.append("If <glossary> is provided, keep those Korean proper nouns and fixed terms exactly as written.")
         prompt_lines.append("<glossary>")
-        for _, target in glossary.items():
+        for _, target in prompt_glossary.items():
             prompt_lines.append(target)
         prompt_lines.append("</glossary>")
 
@@ -64,23 +71,28 @@ def _refine_once(
     item_index: int,
     total_items: int,
     progress_callback: Callable[[str, int, int, str | None], None] | None = None,
-) -> str:
+) -> tuple[str, int, float]:
     prompt = build_refine_prompts(current_text, previous_source, glossary, is_title=is_title)
+    debug_status = build_debug_prompt_status(prompt) if config.debug_mode else None
+    if debug_status is not None and progress_callback is not None:
+        progress_callback("다듬기", item_index - 1, total_items, debug_status)
     base_temperature = config.refine_temperature
     temperature = min(max(base_temperature, 0.35), 0.8)
     top_p = max(config.top_p, 0.95)
-    max_tokens = min(config.n_predict, 256) if is_title else config.n_predict
-    return client.translate(
+    max_tokens = min(config.max_tokens, 256) if is_title else config.max_tokens
+    chunk_started_at = time.monotonic()
+    response, completion_tokens = client.translate(
         prompt,
         temperature=temperature,
         top_p=top_p,
-        n_predict=max_tokens,
+        max_tokens=max_tokens,
         wait_callback=(
-            (lambda: progress_callback("다듬기", item_index - 1, total_items, None))
+            (lambda: progress_callback("다듬기", item_index - 1, total_items, debug_status))
             if progress_callback is not None
             else None
         ),
     )
+    return response, completion_tokens, max(time.monotonic() - chunk_started_at, 0.0)
 
 
 def refine_document(
@@ -89,10 +101,10 @@ def refine_document(
     source_chunks: list[str],
     client: TranslatorClient,
     config: TranslationConfig,
-    output_path: Path,
     *,
     progress_label: str | None = None,
     progress_callback: Callable[[str, int, int, str | None], None] | None = None,
+    output_callback: Callable[[str, int, int, int, float, str | None], None] | None = None,
 ) -> tuple[str, list[str]]:
     if len(source_chunks) != len(translated_chunks):
         raise ValueError("Source chunk count does not match translated chunk count for refinement")
@@ -108,7 +120,7 @@ def refine_document(
         total=total_items,
         progress_label=progress_label,
     )
-    refined_title = _refine_once(
+    refined_title, refined_title_tokens, refined_title_elapsed = _refine_once(
         translated_title,
         None,
         glossary,
@@ -121,6 +133,8 @@ def refine_document(
     )
     refined_title = normalize_translation(refined_title)
     refined_title = refined_title or translated_title
+    if output_callback is not None:
+        output_callback("다듬기", 1, total_items, refined_title_tokens, refined_title_elapsed, None)
 
     refined_chunks: list[str] = []
 
@@ -135,7 +149,7 @@ def refine_document(
         )
         source_index = index - 2
         previous_source = source_chunks[source_index - 1] if source_index >= 1 else None
-        refined_chunk = _refine_once(
+        refined_chunk, refined_chunk_tokens, refined_chunk_elapsed = _refine_once(
             chunk,
             previous_source,
             glossary,
@@ -150,7 +164,8 @@ def refine_document(
         refined_chunk = normalize_translation(refined_chunk)
         refined_chunk = refined_chunk or chunk
         refined_chunks.append(refined_chunk)
-        atomic_write_text(output_path, build_translated_document(refined_title, refined_chunks))
+        if output_callback is not None:
+            output_callback("다듬기", index, total_items, refined_chunk_tokens, refined_chunk_elapsed, None)
 
     report_progress(
         progress_callback=progress_callback,

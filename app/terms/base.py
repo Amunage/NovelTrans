@@ -23,7 +23,7 @@ from app.ui.control import (
     prompt_glossary_novel_choice,
     wait_for_enter,
 )
-from app.translation.engine import TranslationConfig
+from app.translation.engine import TranslationConfig, build_debug_prompt_status
 from app.ui import (
     render_download_progress_screen,
     render_glossary_candidate_progress_screen,
@@ -34,6 +34,7 @@ from app.utils import find_source_novels
 
 
 GLOSSARY_BATCH_SIZE = 30
+GLOSSARY_EXAMPLE_SENTENCE_COUNT = 3
 MIN_SENTENCE_LENGTH = 12
 MAX_SENTENCE_LENGTH = 140
 TARGET_SENTENCE_LENGTH = 48
@@ -44,8 +45,8 @@ SENTENCE_SPLIT_PATTERN = re.compile(r"(?<=[。！？.!?])\s+|\n+")
 class GlossaryLanguageSupport:
     key: str
     source_label: str
-    extract_glossary_candidates: Callable[[Path, int], dict[str, str]]
-    build_refine_prompt: Callable[[str, list[tuple[str, str]]], str]
+    extract_glossary_candidates: Callable[[Path, int], dict[str, list[str]]]
+    build_refine_prompt: Callable[[str, list[tuple[str, list[str]]]], str]
     default_min_term_count: int = 5
 
 
@@ -112,21 +113,34 @@ def _score_sentence(sentence: str, term: str) -> float:
 
 
 def _choose_example_sentence(term: str, sentences: list[str]) -> str:
-    best_sentence = ""
-    best_score = float("-inf")
-
-    for sentence in sentences:
-        score = _score_sentence(sentence, term)
-        if score > best_score:
-            best_score = score
-            best_sentence = sentence
-
-    if not best_sentence:
-        return term
-    return _shorten_sentence_around_term(best_sentence, term)
+    return _choose_example_sentences(term, sentences, 1)[0]
 
 
-def _chunk_items(items: list[tuple[str, str]], batch_size: int) -> Iterable[list[tuple[str, str]]]:
+def _choose_example_sentences(term: str, sentences: list[str], count: int = GLOSSARY_EXAMPLE_SENTENCE_COUNT) -> list[str]:
+    scored_sentences: list[tuple[float, int, str]] = []
+    seen_sentences: set[str] = set()
+
+    for index, sentence in enumerate(sentences):
+        normalized = _normalize_sentence(sentence)
+        if normalized in seen_sentences:
+            continue
+        seen_sentences.add(normalized)
+        score = _score_sentence(normalized, term)
+        if score == float("-inf"):
+            continue
+        scored_sentences.append((score, index, _shorten_sentence_around_term(normalized, term)))
+
+    if not scored_sentences:
+        return [term]
+
+    scored_sentences.sort(key=lambda item: (-item[0], item[1]))
+    return [sentence for _, _, sentence in scored_sentences[: max(1, count)]]
+
+
+def _chunk_items(
+    items: list[tuple[str, list[str]]],
+    batch_size: int,
+) -> Iterable[list[tuple[str, list[str]]]]:
     for start in range(0, len(items), batch_size):
         yield items[start : start + batch_size]
 
@@ -178,17 +192,18 @@ def _build_glossary_model_config() -> TranslationConfig:
         glossary_path=runtime_settings.glossary_path,
         output_root=runtime_settings.output_root,
         max_chunk_chars=runtime_settings.max_chars,
-        timeout=runtime_settings.timeout,
+        request_timeout=runtime_settings.request_timeout,
         draft_temperature=0.2,
         refine_temperature=runtime_settings.refine_temperature,
         refine_enabled=runtime_settings.refine_enabled,
         top_p=runtime_settings.top_p,
-        n_predict=min(runtime_settings.n_predict, 2048),
+        max_tokens=min(runtime_settings.max_tokens, 2048),
         context_size=runtime_settings.ctx_size,
         gpu_layers=runtime_settings.gpu_layers,
         threads=runtime_settings.threads,
         sleep_seconds=0.0,
         startup_timeout=runtime_settings.startup_timeout,
+        debug_mode=runtime_settings.debug_mode,
     )
 
 
@@ -262,7 +277,7 @@ def _prompt_min_term_count(default_count: int) -> int | None:
 
 def refine_glossary_candidates(
     novel_dir: Path,
-    candidates: dict[str, str],
+    candidates: dict[str, list[str]],
     language: GlossaryLanguageSupport,
 ) -> dict[str, str]:
     if not candidates:
@@ -288,22 +303,24 @@ def refine_glossary_candidates(
             status_message="모델을 준비하는 중...",
         )
         server_process = start_llama_server(config)
-        client = LlamaCppServerClient(config.server_url, config.timeout)
+        client = LlamaCppServerClient(config.server_url, config.request_timeout)
         client.wait_until_ready(config.startup_timeout)
 
         for batch_index, batch in enumerate(batches, start=1):
+            prompt = language.build_refine_prompt(novel_dir.name, batch)
+            debug_status = build_debug_prompt_status(prompt) if config.debug_mode else None
             render_glossary_refine_progress_screen(
                 novel_name=novel_dir.name,
                 batch_index=batch_index,
                 total_batches=len(batches),
                 accepted_count=len(accepted),
-                status_message=f"{len(batch)}개 후보를 정제하는 중...",
+                status_message=debug_status or f"{len(batch)}개 후보를 정제하는 중...",
             )
             response = client.translate(
-                language.build_refine_prompt(novel_dir.name, batch),
+                prompt,
                 temperature=0.1,
                 top_p=config.top_p,
-                n_predict=min(config.n_predict, 1536),
+                max_tokens=min(config.max_tokens, 1536),
             )
             parsed = _extract_json_object(response)
             for term, _ in batch:
@@ -397,9 +414,11 @@ def run_glossary_workflow(language: GlossaryLanguageSupport) -> int:
 __all__ = [
     "GlossaryLanguageSupport",
     "GLOSSARY_BATCH_SIZE",
+    "GLOSSARY_EXAMPLE_SENTENCE_COUNT",
     "MAX_SENTENCE_LENGTH",
     "TARGET_SENTENCE_LENGTH",
     "_choose_example_sentence",
+    "_choose_example_sentences",
     "_normalize_sentence",
     "_split_sentences",
     "refine_glossary_candidates",

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable
 
-from app.terms.base import _choose_example_sentence, _normalize_sentence, _split_sentences
+from app.terms.base import _choose_example_sentences, _normalize_sentence, _split_sentences
 from app.utils import find_chapter_files, parse_source_file
 
 
@@ -32,7 +32,7 @@ class TermExtractionConfig:
     reject_candidate: RejectCandidate | None = None
 
 
-def extract_candidates(novel_dir: Path, config: TermExtractionConfig) -> dict[str, str]:
+def extract_candidates(novel_dir: Path, config: TermExtractionConfig) -> dict[str, list[str]]:
     chapter_files = find_chapter_files(novel_dir)
     term_counts: Counter[str] = Counter()
     file_counts: Counter[str] = Counter()
@@ -69,7 +69,7 @@ def extract_candidates(novel_dir: Path, config: TermExtractionConfig) -> dict[st
             for term in found_terms:
                 sentences_by_term[term].append(_normalize_sentence(sentence))
 
-    scored_candidates: list[tuple[str, str, float, int]] = []
+    scored_candidates: list[tuple[str, list[str], float, int]] = []
     for source_order, (term, count) in enumerate(term_counts.most_common()):
         if count < config.min_term_count or file_counts[term] < config.min_file_count:
             continue
@@ -82,7 +82,7 @@ def extract_candidates(novel_dir: Path, config: TermExtractionConfig) -> dict[st
         if term_score < config.min_term_score:
             continue
 
-        scored_candidates.append((term, _choose_example_sentence(term, sentences), term_score, source_order))
+        scored_candidates.append((term, _choose_example_sentences(term, sentences), term_score, source_order))
 
     scored_candidates.sort(key=lambda item: (-item[2], item[3]))
     return {term: example for term, example, _, _ in scored_candidates[: config.max_candidates]}

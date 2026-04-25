@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 from typing import Iterable
 
-from app.terms.base import GlossaryLanguageSupport
+from app.terms.base import GLOSSARY_EXAMPLE_SENTENCE_COUNT, GlossaryLanguageSupport
 from app.terms.candidate import TermExtractionConfig, extract_candidates
 from app.terms.wordlist import has_word
 
@@ -90,6 +90,58 @@ def _has_name_suffix(term: str) -> bool:
             stem = compact_term[: -len(suffix)]
             return KANJI_OR_KATAKANA_PATTERN.search(stem) is not None
     return False
+
+
+def _strip_name_suffix(term: str) -> str:
+    normalized = _normalize_term(term)
+    for suffix in sorted(NAME_SUFFIXES, key=len, reverse=True):
+        if normalized.endswith(suffix):
+            stem = _normalize_term(normalized[: -len(suffix)])
+            if stem and KANJI_OR_KATAKANA_PATTERN.search(stem):
+                return stem
+    return normalized
+
+
+def _merge_name_suffix_variants(candidates: dict[str, list[str]]) -> dict[str, list[str]]:
+    merged: dict[str, list[str]] = {}
+    for term, examples in candidates.items():
+        canonical_term = _strip_name_suffix(term)
+        merged_examples = merged.setdefault(canonical_term, [])
+        for example in examples:
+            if example not in merged_examples:
+                merged_examples.append(example)
+            if len(merged_examples) >= GLOSSARY_EXAMPLE_SENTENCE_COUNT:
+                break
+    return merged
+
+
+def _find_contained_name_term(term: str, name_terms: list[str]) -> str | None:
+    for name_term in name_terms:
+        if name_term == term or name_term not in term:
+            continue
+        return name_term
+    return None
+
+
+def _merge_contained_name_variants(candidates: dict[str, list[str]]) -> dict[str, list[str]]:
+    name_terms = [
+        term
+        for term in candidates
+        if KATAKANA_ONLY_PATTERN.fullmatch(term) or _has_name_pattern(term)
+    ]
+    name_terms.sort(key=len, reverse=True)
+
+    merged: dict[str, list[str]] = {}
+    for term, examples in candidates.items():
+        is_name_candidate = term in name_terms
+        canonical_term = term if is_name_candidate else (_find_contained_name_term(term, name_terms) or term)
+        merged_examples = merged.setdefault(canonical_term, [])
+        for example in examples:
+            if example not in merged_examples:
+                merged_examples.append(example)
+            if len(merged_examples) >= GLOSSARY_EXAMPLE_SENTENCE_COUNT:
+                break
+    return merged
 
 
 def _iter_term_matches(text: str) -> Iterable[re.Match[str]]:
@@ -226,14 +278,16 @@ def _reject_candidate(term: str, sentences: list[str]) -> bool:
     return _is_dictionary_word(term) and not _has_name_like_usage(term, sentences)
 
 
-def build_refine_prompt(novel_name: str, candidates: list[tuple[str, str]]) -> str:
+def build_refine_prompt(novel_name: str, candidates: list[tuple[str, list[str]]]) -> str:
     prompt_lines = GLOSSARY_SYSTEM_INSTRUCTIONS.copy()
     prompt_lines.append(f"Novel: {novel_name}")
     prompt_lines.append("Review the following candidate glossary entries.")
-    prompt_lines.append("Each line is formatted as: Japanese term => example sentence")
+    prompt_lines.append("Each entry is formatted as: Japanese term => example sentences")
     prompt_lines.append("<candidates>")
-    for term, example in candidates:
-        prompt_lines.append(f"{term} => {example}")
+    for term, examples in candidates:
+        prompt_lines.append(f"{term} =>")
+        for index, example in enumerate(examples, start=1):
+            prompt_lines.append(f"  {index}. {example}")
     prompt_lines.append("</candidates>")
     prompt_lines.append(
         'Return strict JSON like {"トレセン学園":"트레센 학원","セイウンスカイ":"세이운 스카이"} and include only accepted glossary entries.'
@@ -241,8 +295,8 @@ def build_refine_prompt(novel_name: str, candidates: list[tuple[str, str]]) -> s
     return "\n".join(prompt_lines)
 
 
-def extract_glossary_candidates(novel_dir: Path, min_term_count: int = MIN_TERM_COUNT) -> dict[str, str]:
-    return extract_candidates(
+def extract_glossary_candidates(novel_dir: Path, min_term_count: int = MIN_TERM_COUNT) -> dict[str, list[str]]:
+    candidates = extract_candidates(
         novel_dir,
         TermExtractionConfig(
             iter_matches=_iter_term_matches,
@@ -257,6 +311,8 @@ def extract_glossary_candidates(novel_dir: Path, min_term_count: int = MIN_TERM_
             max_candidates=MAX_CANDIDATES,
         ),
     )
+    candidates = _merge_name_suffix_variants(candidates)
+    return _merge_contained_name_variants(candidates)
 
 
 JAPANESE_GLOSSARY = GlossaryLanguageSupport(

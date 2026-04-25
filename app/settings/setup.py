@@ -15,6 +15,7 @@ from app.settings.config import (
     ENV_PATH,
     PROMPT_SETTINGS_PATH,
     get_configured_model_path,
+    read_env_file,
     update_env_value,
 )
 from app.settings.default import (
@@ -43,6 +44,28 @@ from app.ui import render_download_progress_screen
 MODEL_SETUP_METADATA = ".noveltrans-model.json"
 
 
+def sync_env_file_with_defaults(env_path: Path = ENV_PATH) -> None:
+    existing_values = read_env_file(env_path)
+    merged_values = {
+        key: existing_values.get(key, default_value)
+        for key, default_value in DEFAULT_ENV_VALUES.items()
+    }
+    next_content = "\n".join(f"{key}={value}" for key, value in merged_values.items()) + "\n"
+    current_content = env_path.read_text(encoding="utf-8") if env_path.exists() else ""
+    if current_content == next_content:
+        return
+
+    env_path.write_text(next_content, encoding="utf-8")
+    for key, value in merged_values.items():
+        os.environ[key] = value
+    log_runtime_event(
+        f"synced env file with defaults | path={env_path} | "
+        f"kept={len(set(existing_values) & set(DEFAULT_ENV_VALUES))} | "
+        f"added={len(set(DEFAULT_ENV_VALUES) - set(existing_values))} | "
+        f"removed={len(set(existing_values) - set(DEFAULT_ENV_VALUES))}"
+    )
+
+
 def ensure_runtime_setup() -> None:
     log_runtime_event(f"ensure_runtime_setup start | app_root={APP_ROOT} | data_root={DATA_ROOT}")
     ensure_default_project_files()
@@ -57,10 +80,7 @@ def ensure_default_project_files() -> None:
         env_path.write_text(DEFAULT_ENV_CONTENT, encoding="utf-8")
         log_runtime_event(f"created env file | path={env_path}")
     else:
-        env_content = env_path.read_text(encoding="utf-8")
-        if "TARGET_LANG=" not in env_content:
-            update_env_value("TARGET_LANG", DEFAULT_ENV_VALUES["TARGET_LANG"], env_path)
-            log_runtime_event(f"added missing env default | key=TARGET_LANG | path={env_path}")
+        sync_env_file_with_defaults(env_path)
 
     DATA_ROOT.mkdir(parents=True, exist_ok=True)
     if not PROMPT_SETTINGS_PATH.exists():
@@ -76,7 +96,7 @@ def ensure_default_project_files() -> None:
     glossary_dir = DATA_ROOT / "glossary"
     glossary_dir.mkdir(parents=True, exist_ok=True)
 
-    glossary_path = glossary_dir / "glossary.json"
+    glossary_path = glossary_dir / "default.json"
     if not glossary_path.exists():
         glossary_path.write_text(DEFAULT_GLOSSARY_CONTENT, encoding="utf-8")
         log_runtime_event(f"created glossary file | path={glossary_path}")

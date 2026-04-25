@@ -20,17 +20,18 @@ class TranslationConfig:
     glossary_path: Path | None
     output_root: Path
     max_chunk_chars: int
-    timeout: int
+    request_timeout: int
     draft_temperature: float
     refine_temperature: float
     refine_enabled: bool
     top_p: float
-    n_predict: int
+    max_tokens: int
     context_size: int
     gpu_layers: int | None
     threads: int | None
     sleep_seconds: float
     startup_timeout: int
+    debug_mode: bool
 
 
 class TranslatorClient(Protocol):
@@ -40,9 +41,9 @@ class TranslatorClient(Protocol):
         *,
         temperature: float,
         top_p: float,
-        n_predict: int,
+        max_tokens: int,
         wait_callback: Callable[[], None] | None = None,
-    ) -> str:
+    ) -> tuple[str, int]:
         ...
 
 
@@ -87,6 +88,13 @@ def validate_glossary_file(glossary_path: Path | None) -> str | None:
     return None
 
 
+def filter_glossary_for_source(text: str | None, glossary: dict[str, str]) -> dict[str, str]:
+    if not text or not glossary:
+        return {}
+
+    return {source: target for source, target in glossary.items() if source and source in text}
+
+
 def build_prompts(
     current_source: str,
     previous_source: str | None,
@@ -103,14 +111,15 @@ def build_prompts(
         if previous_source is not None
         else None
     )
+    prompt_glossary = filter_glossary_for_source(current_source, glossary)
 
     if is_title:
         prompt_lines.append(f"Translate the {language.source_label} title into concise, natural Korean.")
 
-    if glossary:
+    if prompt_glossary:
         prompt_lines.append("If <glossary> is provided, preserve glossary-defined proper nouns and preferred terms exactly.")
         prompt_lines.append("<glossary>")
-        for source, target in sorted(glossary.items(), key=lambda item: len(item[0]), reverse=True):
+        for source, target in sorted(prompt_glossary.items(), key=lambda item: len(item[0]), reverse=True):
             prompt_lines.append(f"{source} => {target}")
         prompt_lines.append("</glossary>")
 
@@ -164,14 +173,18 @@ def build_translated_document(title: str, translated_chunks: list[str]) -> str:
     return f"{title}\n{SEPARATOR_LINE}\n\n{translated_body}\n"
 
 
+def build_debug_prompt_status(prompt: str) -> str:
+    return f"[DEBUG] Final prompt\n{prompt}"
+
+
 def translate_document(
     document: SourceDocument,
     client: TranslatorClient,
     config: TranslationConfig,
-    draft_output_path: Path,
     *,
     progress_label: str | None = None,
     progress_callback: Callable[[str, int, int, str | None], None] | None = None,
+    output_callback: Callable[[str, int, int, int, float, str | None], None] | None = None,
 ) -> tuple[str, list[str]]:
     glossary = load_glossary(config.glossary_path)
     body_chunks = split_into_chunks(document.body, config.max_chunk_chars)
@@ -198,15 +211,19 @@ def translate_document(
         is_title = index == 1
         context_previous_source = previous_source if index >= 3 else None
         prompt = build_prompts(chunk, context_previous_source, glossary, is_title=is_title)
-        max_tokens = min(config.n_predict, 256) if is_title else config.n_predict
+        debug_status = build_debug_prompt_status(prompt) if config.debug_mode else None
+        if debug_status is not None and progress_callback is not None:
+            progress_callback("초벌 번역", index - 1, total_items, debug_status)
+        max_tokens = min(config.max_tokens, 256) if is_title else config.max_tokens
 
-        response = client.translate(
+        chunk_started_at = time.monotonic()
+        response, completion_tokens = client.translate(
             prompt,
             temperature=config.draft_temperature,
             top_p=config.top_p,
-            n_predict=max_tokens,
+            max_tokens=max_tokens,
             wait_callback=(
-                (lambda: progress_callback("초벌 번역", index - 1, total_items, None))
+                (lambda: progress_callback("초벌 번역", index - 1, total_items, debug_status))
                 if progress_callback is not None
                 else None
             ),
@@ -215,13 +232,15 @@ def translate_document(
         if not translated:
             raise RuntimeError(f"Empty translation received for chunk {index}")
 
+        chunk_elapsed_seconds = max(time.monotonic() - chunk_started_at, 0.0)
+        if output_callback is not None:
+            output_callback("초벌 번역", index, total_items, completion_tokens, chunk_elapsed_seconds, debug_status)
+
         if index == 1:
             translated_title = translated or document.title
         else:
             translated_chunks.append(translated)
             previous_source = chunk
-
-        atomic_write_text(draft_output_path, build_translated_document(translated_title, translated_chunks))
 
         if config.sleep_seconds > 0:
             time.sleep(config.sleep_seconds)

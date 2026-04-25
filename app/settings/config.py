@@ -61,16 +61,17 @@ class RuntimeSettings:
     server_url: str
     output_root: Path
     max_chars: int
-    timeout: int
+    request_timeout: int
     draft_temperature: float
     refine_temperature: float
     refine_enabled: bool
     top_p: float
-    n_predict: int
+    max_tokens: int
     ctx_size: int
     gpu_layers: int | None
     threads: int | None
     startup_timeout: int
+    debug_mode: bool
 
 
 def _warn_invalid_env(name: str, value: str, default: object) -> None:
@@ -279,16 +280,17 @@ def get_runtime_settings() -> RuntimeSettings:
         server_url=_get_str("SERVER_URL", DEFAULT_ENV_VALUES["SERVER_URL"]),
         output_root=_get_path("OUTPUT_ROOT", DEFAULT_ENV_VALUES["OUTPUT_ROOT"]),
         max_chars=_get_int("MAX_CHARS", int(DEFAULT_ENV_VALUES["MAX_CHARS"])),
-        timeout=_get_int("TIMEOUT", int(DEFAULT_ENV_VALUES["TIMEOUT"])),
+        request_timeout=_get_int("REQUEST_TIMEOUT", int(DEFAULT_ENV_VALUES["REQUEST_TIMEOUT"])),
         draft_temperature=_get_float("DRAFT_TEMPERATURE", float(DEFAULT_ENV_VALUES["DRAFT_TEMPERATURE"])),
         refine_temperature=_get_float("REFINE_TEMPERATURE", float(DEFAULT_ENV_VALUES["REFINE_TEMPERATURE"])),
-        refine_enabled=_get_bool("REFINE_ENABLED", DEFAULT_ENV_VALUES["REFINE_ENABLED"] == "on"),
+        refine_enabled=_get_bool("REFINE_ENABLED", DEFAULT_ENV_VALUES["REFINE_ENABLED"] == "true"),
         top_p=_get_float("TOP_P", float(DEFAULT_ENV_VALUES["TOP_P"])),
-        n_predict=_get_int("N_PREDICT", int(DEFAULT_ENV_VALUES["N_PREDICT"])),
+        max_tokens=_get_int("MAX_TOKENS", int(DEFAULT_ENV_VALUES["MAX_TOKENS"])),
         ctx_size=_get_int("CTX_SIZE", int(DEFAULT_ENV_VALUES["CTX_SIZE"])),
         gpu_layers=_get_optional_int("GPU_LAYERS"),
         threads=_get_optional_int("THREADS"),
         startup_timeout=_get_int("STARTUP_TIMEOUT", int(DEFAULT_ENV_VALUES["STARTUP_TIMEOUT"])),
+        debug_mode=_get_bool("DEBUG_MODE", DEFAULT_ENV_VALUES["DEBUG_MODE"].lower() == "true"),
     )
 
 

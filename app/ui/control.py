@@ -9,7 +9,7 @@ if __package__ in {None, ""}:
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
 
-from app.settings.config import get_runtime_settings
+from app.settings.config import DATA_ROOT, get_runtime_settings
 from app.translation.engine import TranslationConfig, build_output_path
 from app.ui.render import (
     SETTING_DESCRIPTIONS,
@@ -180,7 +180,31 @@ def _find_last_translated_label(chapter_files: list[Path], output_root: Path) ->
     return f"[{chapter_index}] {chapter_file.name}"
 
 
-def prompt_for_source_files_with_ui(source_root: Path) -> list[Path]:
+def _find_glossary_files() -> list[Path]:
+    glossary_dir = DATA_ROOT / "glossary"
+    if not glossary_dir.is_dir():
+        return []
+    return sorted(glossary_dir.glob("*.json"), key=lambda path: (path.name != "default.json", path.name.lower()))
+
+
+def _add_glossary_file(glossary_files: list[Path], glossary_path: Path) -> list[Path]:
+    if glossary_path in glossary_files:
+        return glossary_files
+    if not glossary_path.is_file():
+        return glossary_files
+    return [*glossary_files, glossary_path]
+
+
+def _get_default_glossary_for_novel(
+    selected_novel: Path,
+    glossary_files: Sequence[Path],
+    fallback_glossary: Path,
+) -> Path:
+    glossary_by_name = {path.name: path for path in glossary_files}
+    return glossary_by_name.get(f"{selected_novel.name}.json") or fallback_glossary
+
+
+def prompt_for_source_files_with_ui(source_root: Path) -> tuple[list[Path], Path | None]:
     novel_dirs = find_source_novels(source_root)
     if not novel_dirs:
         raise ValueError(f"No source novel folders found: {source_root}")
@@ -189,6 +213,7 @@ def prompt_for_source_files_with_ui(source_root: Path) -> list[Path]:
     step = "novel"
     status_message = None
     selected_novel: Path | None = None
+    selected_glossary: Path | None = None
 
     while True:
         if step == "novel":
@@ -203,18 +228,67 @@ def prompt_for_source_files_with_ui(source_root: Path) -> list[Path]:
             command = parse_command(raw)
 
             if command == "back":
-                return []
+                return [], None
 
             status_message = validate_menu_number(raw, len(novel_dirs))
             if status_message is not None:
                 continue
 
             selected_novel = novel_dirs[int(raw) - 1]
-            step = "chapter"
+            step = "glossary"
             status_message = None
             continue
 
         assert selected_novel is not None
+        if step == "glossary":
+            glossary_files = _add_glossary_file(_find_glossary_files(), runtime_settings.glossary_path)
+            if not glossary_files:
+                selected_glossary = runtime_settings.glossary_path
+                step = "chapter"
+                status_message = f"[WARN] 용어집 파일이 없어 기본 경로를 사용합니다: {selected_glossary}"
+                continue
+
+            default_glossary = _get_default_glossary_for_novel(
+                selected_novel,
+                glossary_files,
+                runtime_settings.glossary_path,
+            )
+            render_translation_selection_screen(
+                step="glossary",
+                source_root=source_root,
+                novel_dirs=novel_dirs,
+                target_lang=runtime_settings.target_lang,
+                selected_novel=selected_novel,
+                glossary_files=glossary_files,
+                default_glossary=default_glossary,
+                status_message=status_message,
+            )
+            raw = input("").strip()
+            command = parse_command(raw)
+
+            if command == "back":
+                step = "novel"
+                status_message = None
+                continue
+
+            if raw == "":
+                selected_glossary = default_glossary
+                step = "chapter"
+                status_message = None
+                continue
+
+            status_message = validate_menu_number(raw, len(glossary_files))
+            if status_message is not None:
+                continue
+
+            selected_glossary = glossary_files[int(raw) - 1]
+            step = "chapter"
+            status_message = None
+            continue
+
+        if selected_glossary is None:
+            selected_glossary = runtime_settings.glossary_path
+
         chapter_files = find_chapter_files(selected_novel)
         if not chapter_files:
             raise ValueError(f"No chapter files found in: {selected_novel}")
@@ -225,6 +299,7 @@ def prompt_for_source_files_with_ui(source_root: Path) -> list[Path]:
             novel_dirs=novel_dirs,
             target_lang=runtime_settings.target_lang,
             selected_novel=selected_novel,
+            selected_glossary=selected_glossary,
             chapter_files=chapter_files,
             last_translated_label=_find_last_translated_label(chapter_files, runtime_settings.output_root),
             status_message=status_message,
@@ -233,7 +308,7 @@ def prompt_for_source_files_with_ui(source_root: Path) -> list[Path]:
         command = parse_command(raw)
 
         if command == "back":
-            step = "novel"
+            step = "glossary"
             status_message = None
             continue
 
@@ -247,4 +322,4 @@ def prompt_for_source_files_with_ui(source_root: Path) -> list[Path]:
             status_message = f"[ERROR] 1~{len(chapter_files)} 범위 내로 입력해 주세요."
             continue
 
-        return chapter_files[start_index - 1 : end_index]
+        return chapter_files[start_index - 1 : end_index], selected_glossary

@@ -43,6 +43,22 @@ TARGET_LANG_ALIASES = {
     "ch": "chinese",
     "chinese": "chinese",
 }
+TRANSLATION_SIZE_RULES = {
+    "japanese": {
+        "source_token_ratio": 0.75,
+        "output_token_ratio": 1.4,
+        "prompt_overhead_tokens": 1200,
+        "glossary_overhead_tokens": 500,
+        "max_chars_warn": 2200,
+    },
+    "chinese": {
+        "source_token_ratio": 0.9,
+        "output_token_ratio": 1.8,
+        "prompt_overhead_tokens": 1300,
+        "glossary_overhead_tokens": 600,
+        "max_chars_warn": 1800,
+    },
+}
 
 
 @dataclass(frozen=True)
@@ -84,7 +100,7 @@ def _check_runtime_files() -> list[DiagnosticResult]:
         "source folder": APP_ROOT / "source",
         "translated folder": APP_ROOT / "translated",
         "glossary folder": DATA_ROOT / "glossary",
-        "default glossary": DATA_ROOT / "glossary" / "glossary.json",
+        "default glossary": DATA_ROOT / "glossary" / "default.json",
     }
     existed_before = {name: path.exists() for name, path in expected_paths.items()}
 
@@ -203,6 +219,87 @@ def _check_runtime_paths() -> list[DiagnosticResult]:
         results.append(_result("output folder", "FAIL", f"not writable: {exc}"))
 
     return results
+
+
+def _check_translation_size_settings() -> list[DiagnosticResult]:
+    try:
+        settings = get_runtime_settings()
+    except Exception as exc:
+        return [_result("translation size settings", "FAIL", f"runtime settings unavailable: {exc}")]
+
+    max_chars = settings.max_chars
+    max_tokens = settings.max_tokens
+    ctx_size = settings.ctx_size
+    rules = TRANSLATION_SIZE_RULES.get(settings.target_lang, TRANSLATION_SIZE_RULES["japanese"])
+    source_token_ratio = float(rules["source_token_ratio"])
+    output_token_ratio = float(rules["output_token_ratio"])
+    prompt_overhead_tokens = int(rules["prompt_overhead_tokens"])
+    glossary_overhead_tokens = int(rules["glossary_overhead_tokens"])
+    max_chars_warn = int(rules["max_chars_warn"])
+
+    estimated_current_source_tokens = max(1, int(max_chars * source_token_ratio))
+    estimated_previous_source_tokens = estimated_current_source_tokens
+    safety_margin_tokens = 512
+    estimated_required_context = (
+        prompt_overhead_tokens
+        + glossary_overhead_tokens
+        + estimated_previous_source_tokens
+        + estimated_current_source_tokens
+        + max_tokens
+        + safety_margin_tokens
+    )
+    recommended_max_tokens = max(512, int(max_chars * output_token_ratio))
+    recommended_ctx_size = estimated_required_context
+
+    if max_tokens < 512:
+        return [
+            _result(
+                "translation size settings",
+                "FAIL",
+                f"MAX_TOKENS={max_tokens} is too small; output may be cut off. Use at least 512.",
+            )
+        ]
+
+    if max_tokens < recommended_max_tokens:
+        return [
+            _result(
+                "translation size settings",
+                "WARN",
+                f"TARGET_LANG={settings.target_lang}, MAX_CHARS={max_chars}, MAX_TOKENS={max_tokens}; output may be cut off. "
+                f"Recommend MAX_TOKENS >= {recommended_max_tokens} or lower MAX_CHARS.",
+            )
+        ]
+
+    if ctx_size < estimated_required_context:
+        return [
+            _result(
+                "translation size settings",
+                "WARN",
+                f"CTX_SIZE={ctx_size} may be tight for TARGET_LANG={settings.target_lang}, "
+                f"MAX_CHARS={max_chars}, and MAX_TOKENS={max_tokens}. "
+                f"Estimated prompt includes instructions, selected glossary, previous source, current source, and output. "
+                f"Recommend CTX_SIZE >= {recommended_ctx_size} or lower MAX_CHARS/MAX_TOKENS.",
+            )
+        ]
+
+    if max_chars > max_chars_warn:
+        return [
+            _result(
+                "translation size settings",
+                "WARN",
+                f"TARGET_LANG={settings.target_lang}, MAX_CHARS={max_chars} is high; "
+                f"long chunks are more likely to be truncated or drift.",
+            )
+        ]
+
+    return [
+        _result(
+            "translation size settings",
+            "PASS",
+            f"TARGET_LANG={settings.target_lang}, MAX_CHARS={max_chars}, "
+            f"MAX_TOKENS={max_tokens}, CTX_SIZE={ctx_size} look reasonable for prompt + glossary + previous/current source",
+        )
+    ]
 
 
 def _check_source_inventory() -> list[DiagnosticResult]:
@@ -362,6 +459,7 @@ def run_full_diagnostics() -> str:
     try:
         sections.append(("Runtime", _check_runtime_files()))
         sections.append(("Paths", _check_runtime_paths()))
+        sections.append(("Settings", _check_translation_size_settings()))
         sections.append(("Source", _check_source_inventory()))
         sections.append(("Features", _check_feature_prerequisites()))
         sections.append(("Server", _check_server_health()))
