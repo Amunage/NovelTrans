@@ -316,7 +316,7 @@ def refine_glossary_candidates(
                 accepted_count=len(accepted),
                 status_message=debug_status or f"{len(batch)}개 후보를 정제하는 중...",
             )
-            response = client.translate(
+            response, _completion_tokens = client.translate(
                 prompt,
                 temperature=0.1,
                 top_p=config.top_p,

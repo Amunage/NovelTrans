@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import tempfile
 import webbrowser
 from pathlib import Path
 
 from app.settings.config import get_env_settings_items, reset_env_settings_to_defaults, update_env_setting
 from app.settings.logging import log_runtime_event
+from app.settings.prompt import PROMPT_SETTINGS_PATH, load_prompt_settings, save_prompt_settings
 from app.ui.control import (
     parse_command,
     prompt_env_reset_confirmation,
@@ -23,6 +27,13 @@ from app.ui.render import (
     _print_header,
 )
 from app.ui.validators import normalize_env_setting_value, validate_env_setting_value, validate_menu_number
+
+
+CUSTOM_PROMPT_MENU_ITEMS = [
+    ("translation_instructions", "번역"),
+    ("refiner_instructions", "다듬기"),
+    ("glossary_instructions", "용어집"),
+]
 
 
 def prompt_for_model_download(
@@ -148,6 +159,91 @@ def run_env_settings_menu() -> str | None:
         status_message = f"[INFO] {key} 값을 '{display_value}'로 변경했습니다."
 
 
+def _render_custom_prompt_menu(status_message: str | None = None) -> None:
+    clear_screen()
+    _print_header("커스텀 프롬프트")
+    print("수정할 프롬프트 번호를 입력해 주세요.")
+    print("-" * 60)
+    for index, (_, label) in enumerate(CUSTOM_PROMPT_MENU_ITEMS, start=1):
+        print(f"[{index}] {label}")
+    print("[=] 뒤로가기")
+    print("-" * 60)
+    print(status_message or "")
+    print("-" * 60)
+
+
+def _edit_text_in_console(label: str, current_text: str) -> str | None:
+    clear_screen()
+    _print_header(f"커스텀 프롬프트 - {label}")
+    print("현재 내용:")
+    print("-" * 60)
+    print(current_text or "(비어 있음)")
+    print("-" * 60)
+    print("새 내용을 입력하세요. 한 줄에 마침표(.)만 입력하면 저장합니다.")
+    print("취소하려면 첫 줄에 = 를 입력하세요. 전체 삭제는 빈 상태에서 . 를 입력하세요.")
+    print("-" * 60)
+
+    lines: list[str] = []
+    while True:
+        line = input()
+        if not lines and line.strip() == "=":
+            return None
+        if line == ".":
+            return "\n".join(lines).strip()
+        lines.append(line)
+
+
+def _edit_text_in_notepad(label: str, current_text: str) -> str | None:
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=f"_{label}.txt", delete=False) as temp_file:
+        temp_path = Path(temp_file.name)
+        temp_file.write(current_text)
+
+    try:
+        subprocess.run(["notepad.exe", str(temp_path)], check=False)
+        return temp_path.read_text(encoding="utf-8").strip()
+    finally:
+        try:
+            temp_path.unlink()
+        except OSError:
+            pass
+
+
+def _edit_custom_prompt(label: str, key: str) -> str:
+    settings = load_prompt_settings()
+    current_text = settings.get(key, "")
+    if os.name == "nt":
+        new_text = _edit_text_in_notepad(label, current_text)
+    else:
+        new_text = _edit_text_in_console(label, current_text)
+
+    if new_text is None:
+        return f"[INFO] {label} 커스텀 프롬프트 수정을 취소했습니다."
+
+    settings[key] = new_text
+    save_prompt_settings(settings)
+    log_runtime_event(f"custom prompt updated | key={key} | path={PROMPT_SETTINGS_PATH}")
+    return f"[INFO] {label} 커스텀 프롬프트를 저장했습니다."
+
+
+def run_custom_prompt_menu() -> str | None:
+    status_message = None
+
+    while True:
+        _render_custom_prompt_menu(status_message)
+        choice = input("").strip()
+        command = parse_command(choice)
+
+        if choice == "0" or command == "back":
+            return status_message
+
+        status_message = validate_menu_number(choice, len(CUSTOM_PROMPT_MENU_ITEMS))
+        if status_message is not None:
+            continue
+
+        key, label = CUSTOM_PROMPT_MENU_ITEMS[int(choice) - 1]
+        status_message = _edit_custom_prompt(label, key)
+
+
 def run_settings_menu() -> str | None:
     status_message = None
 
@@ -175,6 +271,10 @@ def run_settings_menu() -> str | None:
             continue
 
         if choice == "3":
+            status_message = run_custom_prompt_menu() or "[INFO] 커스텀 프롬프트 설정을 확인했습니다."
+            continue
+
+        if choice == "4":
             render_settings_menu("[INFO] 업데이트를 확인하는 중입니다...")
             from app.settings.update import run_update_flow
 
@@ -189,6 +289,7 @@ def run_settings_menu() -> str | None:
 __all__ = [
     "prompt_for_model_download",
     "prompt_llama_runtime_install",
+    "run_custom_prompt_menu",
     "run_env_settings_menu",
     "run_settings_menu",
 ]

@@ -58,6 +58,7 @@ DEFAULT_PROMPT_CONTENT = json.dumps(
     {
         "translation_instructions": "",
         "refiner_instructions": "",
+        "glossary_instructions": "",
     },
     ensure_ascii=False,
     indent=2,

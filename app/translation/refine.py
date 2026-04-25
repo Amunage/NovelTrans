@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from typing import Callable
 
+from app.settings.prompt import with_user_prompt
 from app.translation.engine import (
     TranslationConfig,
     TranslatorClient,
@@ -57,7 +58,7 @@ def build_refine_prompts(
 
     prompt_lines.append(f"Rewrite only the text inside <{tag_name}>.")
     prompt_lines.extend([f"<{tag_name}>", current_text, f"</{tag_name}>"])
-    return "\n".join(prompt_lines)
+    return "\n".join(with_user_prompt(prompt_lines, "refiner_instructions"))
 
 
 def _refine_once(

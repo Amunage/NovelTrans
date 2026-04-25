@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 
 from app.settings.config import get_runtime_settings
-from app.settings.prompt import CUSTOM_REFINER_INSTRUCTIONS, CUSTOM_TRANSLATION_INSTRUCTIONS
 
 
 @dataclass(frozen=True)
@@ -38,12 +36,14 @@ JAPANESE_TRANSLATION = TranslationLanguageSupport(
         "Preserve meaning, tone, paragraph structure, and dialogue flow.",
         "Do not omit, summarize, simplify, or add information.",
         "Keep names, forms of address, and terminology consistent.",
+        "Use Korean quotation marks consistently: render spoken dialogue with double quotes (" "), inner thoughts with single quotes (' '), and handle 『』 by context as titles, nested quotes, or emphasis.",
         "Return only the Korean translation of the requested text.",
         "Do not add notes, labels, summaries, or quotation marks unless they exist in the source.",
         "Do not explain your reasoning.",
     ),
     refiner_instructions=(
         "Rewrite this Korean draft into natural Korean literary prose in a restrained, understated style.",
+        "Use Korean quotation marks consistently: render spoken dialogue with double quotes (" "), inner thoughts with single quotes (' '), and handle 『』 by context as titles, nested quotes, or emphasis.",
         "Do not intensify, embellish, or over-explain.",
     ),
 )
@@ -76,12 +76,6 @@ SUPPORTED_TRANSLATION_LANGUAGES: dict[str, TranslationLanguageSupport] = {
 }
 
 
-def _split_custom_instructions(raw_text: str) -> list[str]:
-    normalized = raw_text.replace("\r\n", "\n").replace("\r", "\n")
-    lines = [line.strip() for line in re.split(r"\n+", normalized) if line.strip()]
-    return lines
-
-
 def get_translation_language() -> TranslationLanguageSupport:
     runtime_settings = get_runtime_settings()
     return SUPPORTED_TRANSLATION_LANGUAGES[runtime_settings.target_lang]
@@ -89,9 +83,9 @@ def get_translation_language() -> TranslationLanguageSupport:
 
 def get_translation_instructions() -> list[str]:
     language = get_translation_language()
-    return [*language.translation_instructions, *_split_custom_instructions(CUSTOM_TRANSLATION_INSTRUCTIONS)]
+    return [*language.translation_instructions]
 
 
 def get_refiner_instructions() -> list[str]:
     language = get_translation_language()
-    return [*language.refiner_instructions, *_split_custom_instructions(CUSTOM_REFINER_INSTRUCTIONS)]
+    return [*language.refiner_instructions]

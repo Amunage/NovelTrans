@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Callable, Protocol
 
 from app.settings.prompt import SEPARATOR_LINE
+from app.settings.prompt import with_user_prompt
 from app.translation.language import get_translation_instructions, get_translation_language
 from app.utils import SourceDocument, normalize_translation, print_progress, sanitize_model_text, split_into_chunks
 
@@ -129,7 +130,7 @@ def build_prompts(
 
     prompt_lines.append(f"Translate only the text inside <{tag_name}> into Korean.")
     prompt_lines.extend([f"<{tag_name}>", current_source, f"</{tag_name}>"])
-    return "\n".join(prompt_lines)
+    return "\n".join(with_user_prompt(prompt_lines, "translation_instructions"))
 
 
 def build_output_path(source_file: Path, output_root: Path) -> Path:

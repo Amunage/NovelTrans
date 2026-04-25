@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from app.settings.prompt import with_user_prompt
 from app.terms.base import GLOSSARY_EXAMPLE_SENTENCE_COUNT, GlossaryLanguageSupport
 from app.terms.candidate import TermExtractionConfig, extract_candidates
 from app.terms.wordlist import has_word
@@ -468,7 +469,7 @@ def build_refine_prompt(novel_name: str, candidates: list[tuple[str, list[str]]]
     prompt_lines.append(
         'Return strict JSON like {"天海学院":"텐카이 학원","林晚":"린 완"} and include only accepted glossary entries.'
     )
-    return "\n".join(prompt_lines)
+    return "\n".join(with_user_prompt(prompt_lines, "glossary_instructions"))
 
 
 def extract_glossary_candidates(novel_dir: Path, min_term_count: int = MIN_TERM_COUNT) -> dict[str, list[str]]:
