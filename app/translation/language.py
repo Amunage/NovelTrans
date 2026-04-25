@@ -36,14 +36,14 @@ JAPANESE_TRANSLATION = TranslationLanguageSupport(
         "Preserve meaning, tone, paragraph structure, and dialogue flow.",
         "Do not omit, summarize, simplify, or add information.",
         "Keep names, forms of address, and terminology consistent.",
-        "Use Korean quotation marks consistently: render spoken dialogue with double quotes (" "), inner thoughts with single quotes (' '), and handle 『』 by context as titles, nested quotes, or emphasis.",
+        "Preserve the source quotation mark style and do not convert 「」, 『』, (), or other quote-like marks into a different style.",
         "Return only the Korean translation of the requested text.",
         "Do not add notes, labels, summaries, or quotation marks unless they exist in the source.",
         "Do not explain your reasoning.",
     ),
     refiner_instructions=(
         "Rewrite this Korean draft into natural Korean literary prose in a restrained, understated style.",
-        "Use Korean quotation marks consistently: render spoken dialogue with double quotes (" "), inner thoughts with single quotes (' '), and handle 『』 by context as titles, nested quotes, or emphasis.",
+        "Preserve the source quotation mark style and do not convert 「」, 『』, (), or other quote-like marks into a different style.",
         "Do not intensify, embellish, or over-explain.",
     ),
 )
