@@ -110,6 +110,29 @@ def _save_final_translation_from_review(review_file: Path, original_review_text:
     return final_path
 
 
+def _confirm_apply_all_review_files(review_files: list[Path]) -> bool:
+    print(f"모든 review 파일 {len(review_files)}개를 최종 결과에 적용하시겠습니까? (y/n)")
+    return input("").strip().lower() == "y"
+
+
+def _save_all_final_translations_from_reviews(review_files: list[Path]) -> tuple[list[Path], list[tuple[Path, Exception]]]:
+    saved_paths: list[Path] = []
+    failed_files: list[tuple[Path, Exception]] = []
+
+    for review_file in review_files:
+        try:
+            final_path = _save_final_translation_from_review(review_file)
+        except Exception as exc:
+            failed_files.append((review_file, exc))
+            log_runtime_event(f"review batch save failed | review={review_file} | error={exc!r}")
+            continue
+
+        saved_paths.append(final_path)
+        log_runtime_event(f"review batch saved final translation | review={review_file} | output={final_path}")
+
+    return saved_paths, failed_files
+
+
 def _select_review_novel(output_root: Path, status_message: str | None) -> tuple[Path | None, str | None]:
     novel_dirs = find_translated_novels(output_root)
     if not novel_dirs:
@@ -163,6 +186,25 @@ def main() -> int:
             if command == "back":
                 status_message = None
                 break
+
+            if raw == "-":
+                if not _confirm_apply_all_review_files(review_files):
+                    file_status = "[INFO] 일괄 적용을 취소했습니다."
+                    continue
+
+                saved_paths, failed_files = _save_all_final_translations_from_reviews(review_files)
+                if failed_files:
+                    failed_names = ", ".join(path.name for path, _ in failed_files[:3])
+                    if len(failed_files) > 3:
+                        failed_names += f" 외 {len(failed_files) - 3}개"
+                    file_status = (
+                        f"[WARN] 일괄 적용 완료: 성공 {len(saved_paths)}개, 실패 {len(failed_files)}개 "
+                        f"({failed_names})"
+                    )
+                    continue
+
+                file_status = f"[INFO] 모든 review 파일을 최종 결과에 적용했습니다: {len(saved_paths)}개"
+                continue
 
             file_status = validate_menu_number(raw, len(review_files))
             if file_status is not None:

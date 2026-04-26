@@ -322,11 +322,12 @@ def render_review_file_selection_screen(
     print("= 뒤로가기")
     print("-" * 60)
     print("검수할 review 파일 번호를 입력해 주세요.")
+    print("([-] 입력: 모든 검수 파일을 최종 결과에 적용)")
     print("-" * 60)
     print(f"선택한 소설: {novel_dir.name}")
     print(f"검수 파일: {len(review_files)}개")
     if review_files:
-        print(f"범위: {review_files[0].name} ~ {review_files[-1].name}")
+        print(f"범위: [1] {review_files[0].name} ~ [{len(review_files)}] {review_files[-1].name}")
     print("-" * 60)
     print(status_message or "")
     print("-" * 60)
