@@ -14,6 +14,8 @@ from app.translation.engine import (
     atomic_write_text,
     build_draft_output_path,
     build_output_path,
+    build_review_document,
+    build_review_output_path,
     build_translated_document,
     translate_document,
     validate_glossary_file,
@@ -43,8 +45,8 @@ def parse_args() -> TranslationConfig:
     parser.add_argument("--draft-temperature", type=float, default=runtime_settings.draft_temperature)
     parser.add_argument("--refine-temperature", type=float, default=runtime_settings.refine_temperature)
     parser.add_argument(
-        "--refine-enabled",
-        default="true" if runtime_settings.refine_enabled else "false",
+        "--auto-refine",
+        default="true" if runtime_settings.auto_refine else "false",
         choices=("true", "false"),
         help="Enable or disable the refinement pass",
     )
@@ -74,7 +76,7 @@ def parse_args() -> TranslationConfig:
         request_timeout=max(1, args.request_timeout),
         draft_temperature=args.draft_temperature,
         refine_temperature=args.refine_temperature,
-        refine_enabled=args.refine_enabled == "true",
+        auto_refine=args.auto_refine == "true",
         top_p=args.top_p,
         max_tokens=max(128, args.max_tokens),
         context_size=max(1024, args.ctx_size),
@@ -159,6 +161,7 @@ def main() -> int:
             source_chunks = split_into_chunks(document.body, config.max_chunk_chars)
             draft_output_path = build_draft_output_path(source_file, config.output_root)
             output_path = build_output_path(source_file, config.output_root)
+            review_output_path = build_review_output_path(source_file, config.output_root)
             last_output_path = output_path
             displayed_tokens_per_second: float | None = None
 
@@ -202,7 +205,7 @@ def main() -> int:
             )
             atomic_write_text(draft_output_path, build_translated_document(translated_title, translated_chunks))
 
-            if config.refine_enabled:
+            if config.auto_refine:
                 refined_title, refined_chunks = refine_document(
                     translated_title,
                     translated_chunks,
@@ -213,9 +216,11 @@ def main() -> int:
                     output_callback=output_callback,
                 )
                 atomic_write_text(output_path, build_translated_document(refined_title, refined_chunks))
+                atomic_write_text(review_output_path, build_review_document(source_chunks, refined_chunks))
             else:
                 progress_callback("다듬기 생략", 1, 1, "[INFO] 다듬기가 꺼져 있어 초벌 번역을 최종 결과로 저장합니다.")
                 atomic_write_text(output_path, build_translated_document(translated_title, translated_chunks))
+                atomic_write_text(review_output_path, build_review_document(source_chunks, translated_chunks))
             log_runtime_event(f"translation file complete | source={source_file} | output={output_path}")
 
         stop_llama_server(server_process)

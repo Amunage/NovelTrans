@@ -41,8 +41,8 @@ def validate_env_setting_value(key: str, new_value: str) -> str | None:
         if int_value <= 0:
             return f"[ERROR] {key} 값은 1 이상이어야 합니다."
 
-    if key == "REFINE_ENABLED" and normalized_value.lower() not in BOOL_VALUES:
-        return "[ERROR] REFINE_ENABLED는 true 또는 false만 사용할 수 있습니다."
+    if key == "AUTO_REFINE" and normalized_value.lower() not in BOOL_VALUES:
+        return "[ERROR] AUTO_REFINE는 true 또는 false만 사용할 수 있습니다."
 
     if key == "DEBUG_MODE" and normalized_value.lower() not in BOOL_VALUES:
         return "[ERROR] DEBUG_MODE는 true 또는 false만 사용할 수 있습니다."
@@ -57,7 +57,7 @@ def normalize_env_setting_value(key: str, new_value: str) -> str:
     normalized_value = new_value.strip()
     if key in OPTIONAL_POSITIVE_INT_KEYS and normalized_value.lower() == "auto":
         return ""
-    if key in {"REFINE_ENABLED", "DEBUG_MODE"}:
+    if key in {"AUTO_REFINE", "DEBUG_MODE"}:
         return "true" if normalized_value.lower() in TRUE_VALUES else "false"
     if key == "TARGET_LANG":
         return TARGET_LANG_ALIASES[normalized_value.lower()]

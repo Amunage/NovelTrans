@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,7 +25,7 @@ class TranslationConfig:
     request_timeout: int
     draft_temperature: float
     refine_temperature: float
-    refine_enabled: bool
+    auto_refine: bool
     top_p: float
     max_tokens: int
     context_size: int
@@ -145,6 +146,12 @@ def build_draft_output_path(source_file: Path, output_root: Path) -> Path:
     return output_dir / f"{source_file.stem}_ko_draft.txt"
 
 
+def build_review_output_path(source_file: Path, output_root: Path) -> Path:
+    novel_name = source_file.parent.name or "unknown_novel"
+    output_dir = output_root / novel_name / "review"
+    return output_dir / f"{source_file.stem}_ko_review.txt"
+
+
 def atomic_write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = path.with_suffix(path.suffix + ".tmp")
@@ -172,6 +179,30 @@ def report_progress(
 def build_translated_document(title: str, translated_chunks: list[str]) -> str:
     translated_body = "\n\n".join(chunk.strip() for chunk in translated_chunks if chunk.strip())
     return f"{title}\n{SEPARATOR_LINE}\n\n{translated_body}\n"
+
+
+def _split_review_paragraphs(text: str) -> list[str]:
+    return [paragraph.strip() for paragraph in re.split(r"\n{2,}", text) if paragraph.strip()]
+
+
+def build_review_document(source_chunks: list[str], translated_chunks: list[str]) -> str:
+    review_blocks: list[str] = []
+
+    for source_chunk, translated_chunk in zip(source_chunks, translated_chunks):
+        source_paragraphs = _split_review_paragraphs(source_chunk)
+        translated_paragraphs = _split_review_paragraphs(translated_chunk)
+
+        if source_paragraphs and len(source_paragraphs) == len(translated_paragraphs):
+            pairs = zip(source_paragraphs, translated_paragraphs)
+        else:
+            pairs = [(source_chunk.strip(), translated_chunk.strip())]
+
+        for source, translated in pairs:
+            if not source or not translated:
+                continue
+            review_blocks.append(f"{{{{{source}}}}}\n[[{translated}]]")
+
+    return "\n\n".join(review_blocks).rstrip() + "\n"
 
 
 def build_debug_prompt_status(prompt: str) -> str:

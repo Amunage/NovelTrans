@@ -195,7 +195,7 @@ def _build_glossary_model_config() -> TranslationConfig:
         request_timeout=runtime_settings.request_timeout,
         draft_temperature=0.2,
         refine_temperature=runtime_settings.refine_temperature,
-        refine_enabled=runtime_settings.refine_enabled,
+        auto_refine=runtime_settings.auto_refine,
         top_p=runtime_settings.top_p,
         max_tokens=min(runtime_settings.max_tokens, 2048),
         context_size=runtime_settings.ctx_size,

@@ -24,7 +24,7 @@ def filter_glossary_for_translation(text: str | None, glossary: dict[str, str]) 
 
 def build_refine_prompts(
     current_text: str,
-    previous_source: str | None,
+    current_source: str | None,
     glossary: dict[str, str],
     *,
     is_title: bool,
@@ -33,9 +33,9 @@ def build_refine_prompts(
     prompt_lines = get_refiner_instructions()
     tag_name = "title" if is_title else "current_text"
     current_text = sanitize_model_text(language.preprocess_refine_text(current_text, is_title=is_title)) or ""
-    previous_source = (
-        sanitize_model_text(language.preprocess_source_text(previous_source, is_title=False))
-        if previous_source is not None
+    current_source = (
+        sanitize_model_text(language.preprocess_source_text(current_source, is_title=False))
+        if current_source is not None
         else None
     )
     prompt_glossary = filter_glossary_for_translation(current_text, glossary)
@@ -52,9 +52,9 @@ def build_refine_prompts(
             prompt_lines.append(target)
         prompt_lines.append("</glossary>")
 
-    if not is_title and previous_source:
-        prompt_lines.append("If <previous_source> is provided, treat it as context only.")
-        prompt_lines.extend(["<previous_source>", previous_source, "</previous_source>"])
+    if not is_title and current_source:
+        prompt_lines.append("Use <current_source> as the source text for checking meaning, tone, and line alignment.")
+        prompt_lines.extend(["<current_source>", current_source, "</current_source>"])
 
     prompt_lines.append(f"Rewrite only the text inside <{tag_name}>.")
     prompt_lines.extend([f"<{tag_name}>", current_text, f"</{tag_name}>"])
@@ -63,7 +63,7 @@ def build_refine_prompts(
 
 def _refine_once(
     current_text: str,
-    previous_source: str | None,
+    current_source: str | None,
     glossary: dict[str, str],
     client: TranslatorClient,
     config: TranslationConfig,
@@ -73,7 +73,7 @@ def _refine_once(
     total_items: int,
     progress_callback: Callable[[str, int, int, str | None], None] | None = None,
 ) -> tuple[str, int, float]:
-    prompt = build_refine_prompts(current_text, previous_source, glossary, is_title=is_title)
+    prompt = build_refine_prompts(current_text, current_source, glossary, is_title=is_title)
     debug_status = build_debug_prompt_status(prompt) if config.debug_mode else None
     if debug_status is not None and progress_callback is not None:
         progress_callback("다듬기", item_index - 1, total_items, debug_status)
@@ -149,10 +149,10 @@ def refine_document(
             progress_label=progress_label,
         )
         source_index = index - 2
-        previous_source = source_chunks[source_index - 1] if source_index >= 1 else None
+        current_source = source_chunks[source_index]
         refined_chunk, refined_chunk_tokens, refined_chunk_elapsed = _refine_once(
             chunk,
-            previous_source,
+            current_source,
             glossary,
             is_title=False,
             client=client,

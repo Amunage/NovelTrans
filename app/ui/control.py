@@ -222,6 +222,7 @@ def prompt_for_source_files_with_ui(source_root: Path) -> tuple[list[Path], Path
                 source_root=source_root,
                 novel_dirs=novel_dirs,
                 target_lang=runtime_settings.target_lang,
+                auto_refine=runtime_settings.auto_refine,
                 status_message=status_message,
             )
             raw = input("").strip()

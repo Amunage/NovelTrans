@@ -64,7 +64,7 @@ class RuntimeSettings:
     request_timeout: int
     draft_temperature: float
     refine_temperature: float
-    refine_enabled: bool
+    auto_refine: bool
     top_p: float
     max_tokens: int
     ctx_size: int
@@ -283,7 +283,7 @@ def get_runtime_settings() -> RuntimeSettings:
         request_timeout=_get_int("REQUEST_TIMEOUT", int(DEFAULT_ENV_VALUES["REQUEST_TIMEOUT"])),
         draft_temperature=_get_float("DRAFT_TEMPERATURE", float(DEFAULT_ENV_VALUES["DRAFT_TEMPERATURE"])),
         refine_temperature=_get_float("REFINE_TEMPERATURE", float(DEFAULT_ENV_VALUES["REFINE_TEMPERATURE"])),
-        refine_enabled=_get_bool("REFINE_ENABLED", DEFAULT_ENV_VALUES["REFINE_ENABLED"] == "true"),
+        auto_refine=_get_bool("AUTO_REFINE", DEFAULT_ENV_VALUES["AUTO_REFINE"] == "true"),
         top_p=_get_float("TOP_P", float(DEFAULT_ENV_VALUES["TOP_P"])),
         max_tokens=_get_int("MAX_TOKENS", int(DEFAULT_ENV_VALUES["MAX_TOKENS"])),
         ctx_size=_get_int("CTX_SIZE", int(DEFAULT_ENV_VALUES["CTX_SIZE"])),

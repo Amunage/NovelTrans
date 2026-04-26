@@ -81,6 +81,7 @@ translated/
 - `TARGET_LANG` : 번역할 언어
 - `DRAFT_TEMPERATURE` : 초벌 번역 직역 정도
 - `REFINE_TEMPERATURE` : 다듬기 문체 자연스러움 정도
+- `AUTO_REFINE`: 번역 후 자동 다듬기 사용 여부
 - `CTX_SIZE`: 컨텍스트 크기
 - `MAX_TOKENS`: 최대 출력 토큰 수
 - `GPU_LAYERS`: GPU에 올릴 레이어 수

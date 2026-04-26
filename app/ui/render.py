@@ -20,7 +20,7 @@ SETTING_DESCRIPTIONS = {
     "REQUEST_TIMEOUT": "정수(초) | 모델 응답 대기 시간",
     "DRAFT_TEMPERATURE": "0.0 ~ 1.0 | 낮을수록 보수적, 높을수록 창의적",
     "REFINE_TEMPERATURE": "0.0 ~ 1.0 | 낮을수록 보수적, 높을수록 창의적",
-    "REFINE_ENABLED": "true / false | 번역 후 다듬기 사용 여부",
+    "AUTO_REFINE": "true / false | 번역 후 자동 다듬기 사용 여부",
     "TOP_P": "0.0 ~ 1.0 | 낮을수록 좁게 선택, 높을수록 다양하게 선택",
     "MAX_TOKENS": "정수 | 최대 출력 토큰 수",
     "CTX_SIZE": "정수 | 모델 컨텍스트 크기",
@@ -137,6 +137,12 @@ def format_translation_target_label(target_lang: str | None) -> str:
     if target_lang is None:
         return "알 수 없음"
     return TRANSLATION_TARGET_LABELS.get(target_lang, target_lang)
+
+
+def format_auto_refine_label(auto_refine: bool | None) -> str:
+    if auto_refine is None:
+        return "알 수 없음"
+    return "활성화" if auto_refine else "비활성화"
 
 
 def render_main_menu(status_message: str | None = None) -> None:
@@ -371,6 +377,7 @@ def render_translation_selection_screen(
     source_root: Path,
     novel_dirs: Sequence[Path],
     target_lang: str | None = None,
+    auto_refine: bool | None = None,
     selected_novel: Path | None = None,
     glossary_files: Sequence[Path] | None = None,
     default_glossary: Path | None = None,
@@ -389,6 +396,7 @@ def render_translation_selection_screen(
         print("번역할 소설 번호를 입력해 주세요.")
         print("-" * 60)
         print(f"소설 언어: {format_translation_target_label(target_lang)}")
+        print(f"자동 다듬기: {format_auto_refine_label(auto_refine)}")
         print("-" * 60)
         for index, novel_dir in enumerate(novel_dirs, start=1):
             print(f" [{index}] {novel_dir.name}")
