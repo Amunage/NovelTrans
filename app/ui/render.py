@@ -156,7 +156,8 @@ def render_main_menu(status_message: str | None = None) -> None:
     print("[4] 번역본 검수")
     print("[5] 번역본 병합")
     print("[6] 용어집 생성")
-    print("[7] 환경 설정")
+    print("[7] 용어집 편집")
+    print("[8] 환경 설정")
     print("[=] 종료")
     print("-" * 60)
     print(status_message or "")
@@ -326,6 +327,26 @@ def render_review_file_selection_screen(
     print(f"검수 파일: {len(review_files)}개")
     if review_files:
         print(f"범위: {review_files[0].name} ~ {review_files[-1].name}")
+    print("-" * 60)
+    print(status_message or "")
+    print("-" * 60)
+
+
+def render_glossary_edit_file_selection_screen(
+    *,
+    glossary_files: Sequence[Path],
+    status_message: str | None = None,
+) -> None:
+    clear_screen()
+    _print_header("용어집 편집")
+    print("= 뒤로가기")
+    print("-" * 60)
+    print("편집할 용어집 번호를 입력해 주세요.")
+    print("-" * 60)
+    for index, glossary_file in enumerate(glossary_files, start=1):
+        print(f"[{index}] {glossary_file.name}")
+    print("-" * 60)
+    print("메모장에서는 '원문: 번역' 형식으로 표시됩니다.")
     print("-" * 60)
     print(status_message or "")
     print("-" * 60)

@@ -19,6 +19,7 @@ from app.settings.update import clear_staged_update_files, get_startup_update_st
 from app.extract.crawler import main as crawler_main
 from app.settings.setup import ensure_llama_cpp_runtime, ensure_runtime_setup
 from app.terms import main as glossary_main
+from app.terms.edit import main as glossary_edit_main
 from app.translation.base import main as translation_main
 from app.translation.refine_existing import main as refine_existing_main
 from app.translation.review import main as review_main
@@ -110,6 +111,13 @@ def main() -> int:
                 continue
 
             if choice == "7":
+                result = glossary_edit_main()
+                status_message = None
+                if result == 130:
+                    return 130
+                continue
+
+            if choice == "8":
                 status_message = run_settings_menu()
                 if status_message == "__UPDATE_EXIT__":
                     return 0
