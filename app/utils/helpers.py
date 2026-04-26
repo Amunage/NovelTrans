@@ -28,6 +28,19 @@ def find_chapter_files(novel_dir: Path) -> list[Path]:
     )
 
 
+def find_translated_novels(output_root: Path) -> list[Path]:
+    if not output_root.is_dir():
+        return []
+    return sorted([path for path in output_root.iterdir() if path.is_dir()], key=lambda path: path.name.lower())
+
+
+def find_translated_chapters(novel_dir: Path) -> list[Path]:
+    return sorted(
+        [path for path in novel_dir.glob("*_ko.txt") if path.is_file() and path.parent == novel_dir],
+        key=lambda path: path.name.lower(),
+    )
+
+
 def parse_chapter_selection(raw: str) -> tuple[int, int] | None:
     value = raw.strip()
     if not value:

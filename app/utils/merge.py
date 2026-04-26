@@ -11,26 +11,10 @@ from app.ui.render import (
     render_merge_selection_screen,
 )
 from app.ui.validators import validate_menu_number
+from app.utils import find_translated_chapters, find_translated_novels
 
 
 MERGED_DIR_NAME = "merged"
-
-
-def _find_translated_novels(output_root: Path) -> list[Path]:
-    if not output_root.is_dir():
-        return []
-    return sorted([path for path in output_root.iterdir() if path.is_dir()], key=lambda path: path.name.lower())
-
-
-def _find_translated_chapters(novel_dir: Path) -> list[Path]:
-    return sorted(
-        [
-            path
-            for path in novel_dir.glob("*_ko.txt")
-            if path.is_file() and path.parent == novel_dir
-        ],
-        key=lambda path: path.name.lower(),
-    )
 
 
 def _chunk_files(files: list[Path], group_size: int) -> list[list[Path]]:
@@ -69,7 +53,7 @@ def main() -> int:
     status_message: str | None = None
 
     while True:
-        novel_dirs = _find_translated_novels(output_root)
+        novel_dirs = find_translated_novels(output_root)
         if not novel_dirs:
             render_merge_selection_screen(
                 output_root=output_root,
@@ -94,7 +78,7 @@ def main() -> int:
             continue
 
         selected_novel = novel_dirs[int(raw) - 1]
-        chapter_files = _find_translated_chapters(selected_novel)
+        chapter_files = find_translated_chapters(selected_novel)
         if not chapter_files:
             status_message = f"[WARN] 번역된 챕터 파일이 없습니다: {selected_novel}"
             continue

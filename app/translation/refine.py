@@ -99,7 +99,7 @@ def _refine_once(
 def refine_document(
     translated_title: str,
     translated_chunks: list[str],
-    source_chunks: list[str],
+    source_chunks: list[str | None],
     client: TranslatorClient,
     config: TranslationConfig,
     *,

@@ -218,7 +218,7 @@ def main() -> int:
                 atomic_write_text(output_path, build_translated_document(refined_title, refined_chunks))
                 atomic_write_text(review_output_path, build_review_document(source_chunks, refined_chunks))
             else:
-                progress_callback("다듬기 생략", 1, 1, "[INFO] 다듬기가 꺼져 있어 초벌 번역을 최종 결과로 저장합니다.")
+                progress_callback("다듬기 생략", 1, 1, "[INFO] 다듬기가 꺼져 있어 원문 번역을 최종 결과로 저장합니다.")
                 atomic_write_text(output_path, build_translated_document(translated_title, translated_chunks))
                 atomic_write_text(review_output_path, build_review_document(source_chunks, translated_chunks))
             log_runtime_event(f"translation file complete | source={source_file} | output={output_path}")

@@ -234,7 +234,7 @@ def translate_document(
         report_progress(
             progress_callback=progress_callback,
             fallback_stage="번역",
-            callback_stage="초벌 번역",
+            callback_stage="원문 번역",
             current=index - 1,
             total=total_items,
             progress_label=progress_label,
@@ -245,7 +245,7 @@ def translate_document(
         prompt = build_prompts(chunk, context_previous_source, glossary, is_title=is_title)
         debug_status = build_debug_prompt_status(prompt) if config.debug_mode else None
         if debug_status is not None and progress_callback is not None:
-            progress_callback("초벌 번역", index - 1, total_items, debug_status)
+            progress_callback("원문 번역", index - 1, total_items, debug_status)
         max_tokens = min(config.max_tokens, 256) if is_title else config.max_tokens
 
         chunk_started_at = time.monotonic()
@@ -255,7 +255,7 @@ def translate_document(
             top_p=config.top_p,
             max_tokens=max_tokens,
             wait_callback=(
-                (lambda: progress_callback("초벌 번역", index - 1, total_items, debug_status))
+                (lambda: progress_callback("원문 번역", index - 1, total_items, debug_status))
                 if progress_callback is not None
                 else None
             ),
@@ -266,7 +266,7 @@ def translate_document(
 
         chunk_elapsed_seconds = max(time.monotonic() - chunk_started_at, 0.0)
         if output_callback is not None:
-            output_callback("초벌 번역", index, total_items, completion_tokens, chunk_elapsed_seconds, debug_status)
+            output_callback("원문 번역", index, total_items, completion_tokens, chunk_elapsed_seconds, debug_status)
 
         if index == 1:
             translated_title = translated or document.title
@@ -280,11 +280,11 @@ def translate_document(
     report_progress(
         progress_callback=progress_callback,
         fallback_stage="번역",
-        callback_stage="초벌 번역",
+        callback_stage="원문 번역",
         current=total_items,
         total=total_items,
         progress_label=progress_label,
-        status="초벌 번역 완료" if progress_callback is not None else "번역 완료",
+        status="원문 번역 완료" if progress_callback is not None else "번역 완료",
     )
 
     return translated_title, translated_chunks

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from app.settings.config import get_configured_model_path, get_configured_source_path, get_runtime_settings
 from app.translation.engine import validate_glossary_file
-from app.utils import find_chapter_files, find_source_novels
+from app.utils import find_chapter_files, find_source_novels, find_translated_chapters, find_translated_novels
 
 
 def get_translation_block_reason() -> str | None:
@@ -26,6 +26,27 @@ def get_translation_block_reason() -> str | None:
     return None
 
 
+def get_refine_block_reason() -> str | None:
+    model_path = get_configured_model_path()
+    if not model_path.is_file():
+        return "[ERROR] GGUF 모델이 없습니다. 설정을 확인해주세요."
+
+    settings = get_runtime_settings()
+    glossary_warning = validate_glossary_file(settings.glossary_path)
+    if glossary_warning is not None:
+        return glossary_warning
+
+    output_root = settings.output_root
+    if not output_root.exists() or not output_root.is_dir():
+        return "[ERROR] 번역 결과 폴더가 없습니다. 먼저 원문 번역을 실행해 주세요."
+
+    has_translated_files = any(find_translated_chapters(novel_dir) for novel_dir in find_translated_novels(output_root))
+    if not has_translated_files:
+        return "[ERROR] 다듬을 번역본 txt 파일이 없습니다."
+
+    return None
+
+
 def get_glossary_candidate_block_reason() -> str | None:
     model_path = get_configured_model_path()
     if not model_path.is_file():
@@ -43,4 +64,4 @@ def get_glossary_candidate_block_reason() -> str | None:
     return None
 
 
-__all__ = ["get_glossary_candidate_block_reason", "get_translation_block_reason"]
+__all__ = ["get_glossary_candidate_block_reason", "get_refine_block_reason", "get_translation_block_reason"]

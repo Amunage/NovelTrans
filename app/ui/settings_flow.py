@@ -283,6 +283,14 @@ def run_settings_menu() -> str | None:
                 return "__UPDATE_EXIT__"
             continue
 
+        if choice == "5":
+            render_settings_menu("[INFO] 시스템 진단 중...")
+            from app.utils.diagnostics import run_full_diagnostics
+
+            status_message = run_full_diagnostics()
+            input("")
+            continue
+
         status_message = "[ERROR] 잘못된 입력입니다."
 
 

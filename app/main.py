@@ -14,16 +14,17 @@ from app.settings.config import (
     DATA_ROOT,
 )
 from app.settings.logging import get_log_path, log_runtime_event
-from app.settings.precheck import get_glossary_candidate_block_reason, get_translation_block_reason
+from app.settings.precheck import get_glossary_candidate_block_reason, get_refine_block_reason, get_translation_block_reason
 from app.settings.update import clear_staged_update_files, get_startup_update_status
 from app.extract.crawler import main as crawler_main
 from app.settings.setup import ensure_llama_cpp_runtime, ensure_runtime_setup
 from app.terms import main as glossary_main
 from app.translation.base import main as translation_main
+from app.translation.refine_existing import main as refine_existing_main
+from app.translation.review import main as review_main
 from app.ui.control import prompt_main_menu, wait_for_enter
 from app.ui.render import render_main_menu
 from app.ui.settings_flow import run_settings_menu
-from app.utils.diagnostics import run_full_diagnostics
 from app.utils.merge import main as merge_main
 
 def main() -> int:
@@ -66,6 +67,37 @@ def main() -> int:
                     status_message = setup_message
                     continue
 
+                block_reason = get_refine_block_reason()
+                if block_reason is not None:
+                    status_message = block_reason
+                    continue
+
+                result = refine_existing_main()
+                status_message = None
+                if result == 130:
+                    return 130
+                continue
+
+            if choice == "4":
+                result = review_main()
+                status_message = None
+                if result == 130:
+                    return 130
+                continue
+
+            if choice == "5":
+                result = merge_main()
+                status_message = None
+                if result == 130:
+                    return 130
+                continue
+
+            if choice == "6":
+                setup_message = ensure_llama_cpp_runtime(DATA_ROOT, confirm_install=True)
+                if setup_message is not None:
+                    status_message = setup_message
+                    continue
+
                 block_reason = get_glossary_candidate_block_reason()
                 if block_reason is not None:
                     status_message = block_reason
@@ -77,20 +109,7 @@ def main() -> int:
                     return 130
                 continue
 
-            if choice == "4":
-                result = merge_main()
-                status_message = None
-                if result == 130:
-                    return 130
-                continue
-
-            if choice == "5":
-                render_main_menu("[INFO] 시스템 진단 중...")
-                status_message = run_full_diagnostics()
-                wait_for_enter()
-                continue
-
-            if choice == "6":
+            if choice == "7":
                 status_message = run_settings_menu()
                 if status_message == "__UPDATE_EXIT__":
                     return 0
