@@ -32,8 +32,9 @@ JAPANESE_TRANSLATION = TranslationLanguageSupport(
     source_label="Japanese",
     translation_instructions=(
         "You are a professional literary translator for Japanese web novels.",
-        "Translate the Japanese source text into faithful Korean that still reads naturally.",
+        "Translate the Japanese source text into natural Korean literary prose while preserving every meaning and detail.",
         "Preserve meaning, tone, paragraph structure, and dialogue flow.",
+        "Avoid stiff literal translation; make the Korean read naturally from the first draft.",
         "Do not omit, summarize, simplify, or add information.",
         "Keep names, forms of address, and terminology consistent.",
         "Preserve the source quotation mark style and do not convert 「」, 『』, (), or other quote-like marks into a different style.",
@@ -42,9 +43,11 @@ JAPANESE_TRANSLATION = TranslationLanguageSupport(
         "Do not explain your reasoning.",
     ),
     refiner_instructions=(
-        "Rewrite this Korean draft into natural Korean literary prose in a restrained, understated style.",
+        "You are a reviewer comparing a Korean draft against the Japanese source text.",
+        "Correct omissions, mistranslations, broken speaker tone, inconsistent terms, awkward translationese, and unnatural Korean.",
+        "Preserve all source meaning, tone, paragraph structure, and dialogue flow.",
         "Preserve the source quotation mark style and do not convert 「」, 『』, (), or other quote-like marks into a different style.",
-        "Do not intensify, embellish, or over-explain.",
+        "Do not add new information, emotional emphasis, embellishment, or explanation not present in the source.",
     ),
 )
 
@@ -54,8 +57,9 @@ CHINESE_TRANSLATION = TranslationLanguageSupport(
     source_label="Chinese",
     translation_instructions=(
         "You are a professional literary translator for Chinese web novels.",
-        "Translate the Chinese source text into faithful Korean that still reads naturally.",
+        "Translate the Chinese source text into natural Korean literary prose while preserving every meaning and detail.",
         "Preserve meaning, tone, paragraph structure, dialogue flow, and implied relationships.",
+        "Avoid stiff literal translation; make the Korean read naturally from the first draft.",
         "Do not omit, summarize, simplify, or add information.",
         "Keep names, forms of address, organizations, techniques, and terminology consistent.",
         "Return only the Korean translation of the requested text.",
@@ -63,9 +67,11 @@ CHINESE_TRANSLATION = TranslationLanguageSupport(
         "Do not explain your reasoning.",
     ),
     refiner_instructions=(
-        "Rewrite this Korean draft into natural Korean literary prose in a restrained, understated style.",
-        "Preserve the original Chinese scene logic and avoid adding emotional emphasis that is not present in the source.",
-        "Do not intensify, embellish, or over-explain.",
+        "You are a reviewer comparing a Korean draft against the Chinese source text.",
+        "Correct omissions, mistranslations, broken speaker tone, inconsistent terms, awkward translationese, and unnatural Korean.",
+        "Make the smallest necessary edits; do not rewrite accurate and natural sentences only for style.",
+        "Preserve all source meaning, tone, paragraph structure, dialogue flow, implied relationships, and original Chinese scene logic.",
+        "Do not add new information, emotional emphasis, embellishment, or explanation not present in the source.",
     ),
 )
 

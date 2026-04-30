@@ -13,6 +13,11 @@ from app.translation.language import get_translation_instructions, get_translati
 from app.utils import SourceDocument, normalize_translation, print_progress, sanitize_model_text, split_into_chunks
 
 
+SOURCE_CONTEXT_PREVIOUS_MAX_CHARS = 400
+TRANSLATION_CONTEXT_PREVIOUS_MAX_CHARS = 400
+SOURCE_CONTEXT_NEXT_MAX_CHARS = 200
+
+
 @dataclass
 class TranslationConfig:
     source_file: Path | None
@@ -100,6 +105,8 @@ def filter_glossary_for_source(text: str | None, glossary: dict[str, str]) -> di
 def build_prompts(
     current_source: str,
     previous_source: str | None,
+    previous_translation: str | None,
+    next_source: str | None,
     glossary: dict[str, str],
     *,
     is_title: bool,
@@ -111,6 +118,12 @@ def build_prompts(
     previous_source = (
         sanitize_model_text(language.preprocess_source_text(previous_source, is_title=False))
         if previous_source is not None
+        else None
+    )
+    previous_translation = sanitize_model_text(previous_translation) if previous_translation is not None else None
+    next_source = (
+        sanitize_model_text(language.preprocess_source_text(next_source, is_title=False))
+        if next_source is not None
         else None
     )
     prompt_glossary = filter_glossary_for_source(current_source, glossary)
@@ -129,8 +142,20 @@ def build_prompts(
         prompt_lines.append("If <previous_source> is provided, treat it as context only.")
         prompt_lines.extend(["<previous_source>", previous_source, "</previous_source>"])
 
+    if not is_title and previous_translation:
+        prompt_lines.append(
+            "If <previous_translation> is provided, use it only to keep Korean style, speaker tone, names, and terms consistent."
+        )
+        prompt_lines.append("Do not copy it if it conflicts with <current_source>.")
+        prompt_lines.extend(["<previous_translation>", previous_translation, "</previous_translation>"])
+
     prompt_lines.append(f"Translate only the text inside <{tag_name}> into Korean.")
     prompt_lines.extend([f"<{tag_name}>", current_source, f"</{tag_name}>"])
+
+    if not is_title and next_source:
+        prompt_lines.append("If <next_source> is provided, treat it as context only. Do not translate it.")
+        prompt_lines.extend(["<next_source>", next_source, "</next_source>"])
+
     return "\n".join(with_user_prompt(prompt_lines, "translation_instructions"))
 
 
@@ -185,6 +210,50 @@ def _split_review_paragraphs(text: str) -> list[str]:
     return [paragraph.strip() for paragraph in re.split(r"\n{2,}", text) if paragraph.strip()]
 
 
+def _split_context_sentences(text: str) -> list[str]:
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    if not normalized:
+        return []
+
+    sentences = re.findall(r".+?(?:[。！？!?….]+[」』”’）)\]]*|$)", normalized)
+    return [sentence.strip() for sentence in sentences if sentence.strip()]
+
+
+def select_source_context(
+    text: str | None,
+    *,
+    max_chars: int,
+    from_end: bool,
+) -> str | None:
+    if not text:
+        return None
+    sentences = _split_context_sentences(text)
+    if not sentences or max_chars <= 0:
+        return None
+
+    ordered_sentences = list(reversed(sentences)) if from_end else sentences
+    selected: list[str] = []
+    selected_length = 0
+
+    for sentence in ordered_sentences:
+        addition = len(sentence) if not selected else len(sentence) + 1
+        if selected and selected_length + addition > max_chars:
+            break
+        if not selected and addition > max_chars:
+            selected.append(sentence[:max_chars].rstrip())
+            break
+
+        selected.append(sentence)
+        selected_length += addition
+
+    if not selected:
+        return None
+    if from_end:
+        selected.reverse()
+    return " ".join(selected)
+
+
 def build_review_document(source_chunks: list[str], translated_chunks: list[str]) -> str:
     review_blocks: list[str] = []
 
@@ -228,6 +297,7 @@ def translate_document(
     translated_title = document.title
     translated_chunks: list[str] = []
     previous_source: str | None = None
+    previous_translation: str | None = None
     total_items = len(all_chunks)
 
     for index, chunk in enumerate(all_chunks, start=1):
@@ -241,8 +311,42 @@ def translate_document(
         )
 
         is_title = index == 1
-        context_previous_source = previous_source if index >= 3 else None
-        prompt = build_prompts(chunk, context_previous_source, glossary, is_title=is_title)
+        context_previous_source = (
+            select_source_context(
+                previous_source,
+                max_chars=SOURCE_CONTEXT_PREVIOUS_MAX_CHARS,
+                from_end=True,
+            )
+            if index >= 3
+            else None
+        )
+        context_previous_translation = (
+            select_source_context(
+                previous_translation,
+                max_chars=TRANSLATION_CONTEXT_PREVIOUS_MAX_CHARS,
+                from_end=True,
+            )
+            if index >= 3
+            else None
+        )
+        next_body_index = index - 1
+        context_next_source = (
+            select_source_context(
+                body_chunks[next_body_index],
+                max_chars=SOURCE_CONTEXT_NEXT_MAX_CHARS,
+                from_end=False,
+            )
+            if not is_title and next_body_index < len(body_chunks)
+            else None
+        )
+        prompt = build_prompts(
+            chunk,
+            context_previous_source,
+            context_previous_translation,
+            context_next_source,
+            glossary,
+            is_title=is_title,
+        )
         debug_status = build_debug_prompt_status(prompt) if config.debug_mode else None
         if debug_status is not None and progress_callback is not None:
             progress_callback("원문 번역", index - 1, total_items, debug_status)
@@ -256,7 +360,7 @@ def translate_document(
             max_tokens=max_tokens,
             wait_callback=(
                 (lambda: progress_callback("원문 번역", index - 1, total_items, debug_status))
-                if progress_callback is not None
+                if progress_callback is not None and debug_status is None
                 else None
             ),
         )
@@ -273,6 +377,7 @@ def translate_document(
         else:
             translated_chunks.append(translated)
             previous_source = chunk
+            previous_translation = translated
 
         if config.sleep_seconds > 0:
             time.sleep(config.sleep_seconds)

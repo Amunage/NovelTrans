@@ -42,7 +42,7 @@ DEFAULT_ENV_VALUES = {
     "REFINE_TEMPERATURE": "0.7",
     "AUTO_REFINE": "true",
     "TOP_P": "0.9",
-    "MAX_CHARS": "1400",
+    "MAX_CHARS": "1000",
     "MAX_TOKENS": "2400",
     "CTX_SIZE": "8192",
     "GPU_LAYERS": "auto",

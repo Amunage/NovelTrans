@@ -69,6 +69,7 @@ class LlamaCppServerClient:
             "stop": [
                 "<chapter_title>",
                 "<previous_source>",
+                "<next_source>",
                 "<previous_translation>",
                 "<current_source>",
                 "<previous_refined>",

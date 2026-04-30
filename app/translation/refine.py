@@ -5,11 +5,13 @@ from typing import Callable
 
 from app.settings.prompt import with_user_prompt
 from app.translation.engine import (
+    SOURCE_CONTEXT_NEXT_MAX_CHARS,
     TranslationConfig,
     TranslatorClient,
     build_debug_prompt_status,
     load_glossary,
     report_progress,
+    select_source_context,
 )
 from app.translation.language import get_refiner_instructions, get_translation_language
 from app.utils import normalize_translation, sanitize_model_text
@@ -25,6 +27,7 @@ def filter_glossary_for_translation(text: str | None, glossary: dict[str, str]) 
 def build_refine_prompts(
     current_text: str,
     current_source: str | None,
+    next_source: str | None,
     glossary: dict[str, str],
     *,
     is_title: bool,
@@ -38,12 +41,17 @@ def build_refine_prompts(
         if current_source is not None
         else None
     )
+    next_source = (
+        sanitize_model_text(language.preprocess_source_text(next_source, is_title=False))
+        if next_source is not None
+        else None
+    )
     prompt_glossary = filter_glossary_for_translation(current_text, glossary)
 
     if is_title:
-        prompt_lines.append("Return exactly one revised title only.")
+        prompt_lines.append("Return exactly one corrected title only.")
     else:
-        prompt_lines.append("Return only the revised Korean text.")
+        prompt_lines.append("Return only the corrected Korean text.")
 
     if prompt_glossary:
         prompt_lines.append("If <glossary> is provided, keep those Korean proper nouns and fixed terms exactly as written.")
@@ -53,17 +61,23 @@ def build_refine_prompts(
         prompt_lines.append("</glossary>")
 
     if not is_title and current_source:
-        prompt_lines.append("Use <current_source> as the source text for checking meaning, tone, and line alignment.")
+        prompt_lines.append("Use <current_source> as the source text for checking meaning, tone, omissions, mistranslations, and line alignment.")
         prompt_lines.extend(["<current_source>", current_source, "</current_source>"])
 
-    prompt_lines.append(f"Rewrite only the text inside <{tag_name}>.")
+    prompt_lines.append(f"Review and correct only the text inside <{tag_name}>.")
     prompt_lines.extend([f"<{tag_name}>", current_text, f"</{tag_name}>"])
+
+    if not is_title and next_source:
+        prompt_lines.append("If <next_source> is provided, treat it as context only. Do not rewrite or translate it.")
+        prompt_lines.extend(["<next_source>", next_source, "</next_source>"])
+
     return "\n".join(with_user_prompt(prompt_lines, "refiner_instructions"))
 
 
 def _refine_once(
     current_text: str,
     current_source: str | None,
+    next_source: str | None,
     glossary: dict[str, str],
     client: TranslatorClient,
     config: TranslationConfig,
@@ -73,7 +87,7 @@ def _refine_once(
     total_items: int,
     progress_callback: Callable[[str, int, int, str | None], None] | None = None,
 ) -> tuple[str, int, float]:
-    prompt = build_refine_prompts(current_text, current_source, glossary, is_title=is_title)
+    prompt = build_refine_prompts(current_text, current_source, next_source, glossary, is_title=is_title)
     debug_status = build_debug_prompt_status(prompt) if config.debug_mode else None
     if debug_status is not None and progress_callback is not None:
         progress_callback("다듬기", item_index - 1, total_items, debug_status)
@@ -89,7 +103,7 @@ def _refine_once(
         max_tokens=max_tokens,
         wait_callback=(
             (lambda: progress_callback("다듬기", item_index - 1, total_items, debug_status))
-            if progress_callback is not None
+            if progress_callback is not None and debug_status is None
             else None
         ),
     )
@@ -124,6 +138,7 @@ def refine_document(
     refined_title, refined_title_tokens, refined_title_elapsed = _refine_once(
         translated_title,
         None,
+        None,
         glossary,
         is_title=True,
         client=client,
@@ -150,9 +165,19 @@ def refine_document(
         )
         source_index = index - 2
         current_source = source_chunks[source_index]
+        next_source = (
+            select_source_context(
+                source_chunks[source_index + 1],
+                max_chars=SOURCE_CONTEXT_NEXT_MAX_CHARS,
+                from_end=False,
+            )
+            if source_index + 1 < len(source_chunks)
+            else None
+        )
         refined_chunk, refined_chunk_tokens, refined_chunk_elapsed = _refine_once(
             chunk,
             current_source,
+            next_source,
             glossary,
             is_title=False,
             client=client,

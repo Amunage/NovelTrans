@@ -160,8 +160,11 @@ def sanitize_model_text(text: str | None) -> str | None:
 def normalize_translation(text: str) -> str:
     normalized = sanitize_model_text(text) or ""
     normalized = re.sub(r"\A(?:Korean translation:|Translation:)\s*", "", normalized, flags=re.IGNORECASE)
+    text_wrapper_match = re.fullmatch(r"\s*<\s*text\s*>\s*(.*?)\s*</\s*text\s*>\s*", normalized, flags=re.IGNORECASE | re.DOTALL)
+    if text_wrapper_match:
+        normalized = text_wrapper_match.group(1).strip()
     marker_pattern = re.compile(
-        r"</?\s*(chapter_title|previous_source|previous_translation|current_source|previous_refined|current_text|title|glossary)\s*>",
+        r"</?\s*(chapter_title|previous_source|next_source|previous_translation|current_source|previous_refined|current_text|title|glossary|text)\s*>",
         flags=re.IGNORECASE,
     )
     marker_match = marker_pattern.search(normalized)
