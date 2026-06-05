@@ -28,6 +28,7 @@ CPU_WINDOWS_ASSET_PATTERN = re.compile(r"^llama-.*-bin-win-cpu-x64\.zip$")
 LLAMA_RUNTIME_METADATA = ".noveltrans-runtime.json"
 HUGGING_FACE_MODEL_REPOS = {
     "gemma-4-E4B-it-GGUF": "unsloth/gemma-4-E4B-it-GGUF",
+    "gemma-4-12b-it-GGUF": "unsloth/gemma-4-12b-it-GGUF",
     "gemma-4-26B-A4B-it-GGUF": "unsloth/gemma-4-26B-A4B-it-GGUF",
 }
 HUGGING_FACE_HEADERS = {
@@ -36,54 +37,37 @@ HUGGING_FACE_HEADERS = {
 MODEL_CANDIDATES = [
     {
         "repo": HUGGING_FACE_MODEL_REPOS["gemma-4-26B-A4B-it-GGUF"],
-        "filename": "gemma-4-26B-A4B-it-UD-IQ4_NL.gguf",
-        "label": "26B IQ4_NL",
+        "filename": "gemma-4-26B-A4B-it-UD-Q4_K_M.gguf",
+        "label": "26B Q4_K_M",
         "summary": "26B 계열 권장 균형 모델입니다.",
         "min_vram_gb": 16.0,
         "min_ram_gb": 32.0,
     },
     {
-        "repo": HUGGING_FACE_MODEL_REPOS["gemma-4-26B-A4B-it-GGUF"],
-        "filename": "gemma-4-26B-A4B-it-UD-IQ3_S.gguf",
-        "label": "26B IQ3_S",
-        "summary": "26B 계열 저용량 모델입니다.",
+        "repo": HUGGING_FACE_MODEL_REPOS["gemma-4-12b-it-GGUF"],
+        "filename": "gemma-4-12b-it-Q6_K.gguf",
+        "label": "12B Q6_K",
+        "summary": "12B 계열 고품질 모델입니다.",
         "min_vram_gb": 12.0,
         "min_ram_gb": 24.0,
     },
     {
-        "repo": HUGGING_FACE_MODEL_REPOS["gemma-4-26B-A4B-it-GGUF"],
-        "filename": "gemma-4-26B-A4B-it-UD-IQ2_M.gguf",
-        "label": "26B IQ2_M",
-        "summary": "26B 계열 최소 용량 우선 모델입니다.",
-        "min_vram_gb": 10.0,
-        "min_ram_gb": 16.0,
-    },
-    {
-        "repo": HUGGING_FACE_MODEL_REPOS["gemma-4-E4B-it-GGUF"],
-        "filename": "gemma-4-E4B-it-UD-Q8_K_XL.gguf",
-        "label": "E4B Q8_K_XL",
-        "summary": "E4B 계열 고품질 모델입니다.",
-        "min_vram_gb": 10.0,
-        "min_ram_gb": 16.0,
-    },
-    {
-        "repo": HUGGING_FACE_MODEL_REPOS["gemma-4-E4B-it-GGUF"],
-        "filename": "gemma-4-E4B-it-UD-Q6_K_XL.gguf",
-        "label": "E4B Q6_K_XL",
-        "summary": "E4B 계열 품질과 용량 균형 모델입니다.",
+        "repo": HUGGING_FACE_MODEL_REPOS["gemma-4-12b-it-GGUF"],
+        "filename": "gemma-4-12b-it-Q4_K_M.gguf",
+        "label": "12B Q4_K_M",
+        "summary": "12B 계열 권장 균형 모델입니다.",
         "min_vram_gb": 8.0,
-        "min_ram_gb": 12.0,
+        "min_ram_gb": 16.0,
     },
     {
         "repo": HUGGING_FACE_MODEL_REPOS["gemma-4-E4B-it-GGUF"],
-        "filename": "gemma-4-E4B-it-UD-Q4_K_XL.gguf",
-        "label": "E4B Q4_K_XL",
+        "filename": "gemma-4-E4B-it-Q4_K_M.gguf",
+        "label": "E4B Q4_K_M",
         "summary": "E4B 계열 기본 권장 모델입니다.",
-        "min_vram_gb": 6.0,
+        "min_vram_gb": 4.0,
         "min_ram_gb": 8.0,
     },
 ]
-
 
 def fetch_huggingface_filenames() -> dict[str, set[str]]:
     filenames_by_repo: dict[str, set[str]] = {}

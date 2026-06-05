@@ -83,6 +83,7 @@ def prompt_for_model_download(
             return None
         if choice == "-":
             webbrowser.open("https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF/tree/main")
+            webbrowser.open("https://huggingface.co/unsloth/gemma-4-12b-it-GGUF/tree/main")
             webbrowser.open("https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/tree/main")
             print("[INFO] Hugging Face 모델 페이지를 브라우저로 열었습니다.")
             continue
